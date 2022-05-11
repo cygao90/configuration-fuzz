@@ -5965,8 +5965,8 @@ static u8 fuzz_one(char** argv) {
   // doing_det = 1;
 
   ret_val = 0;
-
-  for (int i = 0; i < 1000; i++) {
+havoc_stage:
+  for (int i = 0; i < 100; i++) {
     havoc(INPUT_QUEUE);
     havoc(CONFIG_QUEUE);
     if (common_fuzz_stuff(argv, mtt[INPUT_QUEUE].out_buf, mtt[CONFIG_QUEUE].out_buf, 
@@ -5987,9 +5987,10 @@ static u8 fuzz_one(char** argv) {
     mtt[CONFIG_QUEUE].out_buf_len = mtt[CONFIG_QUEUE].len;
     memcpy(mtt[CONFIG_QUEUE].out_buf, mtt[CONFIG_QUEUE].in_buf, mtt[CONFIG_QUEUE].len);
 
-    splicing(INPUT_QUEUE);
-    splicing(CONFIG_QUEUE);
+  }
 
+  if (splicing(INPUT_QUEUE) && splicing(CONFIG_QUEUE)) {
+    goto havoc_stage;
   }
 
 abandon_entry:
