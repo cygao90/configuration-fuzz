@@ -827,7 +827,7 @@ static void mark_as_det_done(struct queue_entry* q, u32 oid) {
   u8* fn = strrchr(q->fname, '/');
   s32 fd;
 
-  fn = alloc_printf("%s/queue_%3u/.state/deterministic_done/%s", out_dir, oid, fn + 1);
+  fn = alloc_printf("%s/%s_queue/.state/deterministic_done/%s", out_dir, queue_name[oid], fn + 1);
 
   fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
   if (fd < 0) PFATAL("Unable to create '%s'", fn);
@@ -848,7 +848,7 @@ static void mark_as_variable(struct queue_entry* q, u32 oid) {
   u8 *fn = strrchr(q->fname, '/') + 1, *ldest;
 
   ldest = alloc_printf("../../%s", fn);
-  fn = alloc_printf("%s/queue_%3u/.state/variable_behavior/%s", out_dir, oid, fn);
+  fn = alloc_printf("%s/%s_queue/.state/variable_behavior/%s", out_dir, queue_name[oid], fn);
 
   if (symlink(ldest, fn)) {
 
@@ -2065,7 +2065,7 @@ static void save_auto(void) {
 
     for (i = 0; i < MIN(USE_AUTO_EXTRAS, a_extras_cnt); i++) {
 
-      u8* fn = alloc_printf("%s/queue_%3u/.state/auto_extras/auto_%06u", out_dir, oid, i);
+      u8* fn = alloc_printf("%s/%s_queue/.state/auto_extras/auto_%06u", out_dir, queue_name[oid], i);
       s32 fd;
 
       fd = open(fn, O_WRONLY | O_CREAT | O_TRUNC, 0600);
@@ -2655,7 +2655,7 @@ static u8 run_target(char** argv, u32 timeout) {
 /* Write modified data to file for testing. If out_file is set, the old file
    is unlinked and a new one is created. Otherwise, out_fd is rewound and
    truncated. */
-// TODO
+
 static void write_to_testcase(void* mem, u32 len, enum queue_type type) {
 
   s32 fd;
@@ -2690,7 +2690,7 @@ static void write_to_testcase(void* mem, u32 len, enum queue_type type) {
 
 
 /* The same, but with an adjustable gap. Used for trimming. */
-// TODO:
+
 static void write_with_gap(void* mem, u32 len, u32 skip_at, u32 skip_len) {
 
   s32 fd = out_fd_input;
@@ -2725,20 +2725,22 @@ static void show_stats(void);
 /* Calibrate a new test case. This is done when processing the input directory
    to warn about flaky or otherwise problematic test cases early on; and when
    new paths are discovered to detect variable behavior and so on. */
-// TODO: 
+// TODO 
 static u8 calibrate_case(char** argv, struct queue_entry* q_i, struct queue_entry* q_c, u8* use_input_mem,
-                         u8* use_config_mem, u32 handicap, u8 from_queue) {
+                         u8* use_config_mem, u32 handicap, u8 from_queue, u32 oid) {
 
   static u8 first_trace[MAP_SIZE];
 
+  struct queue_entry *q[TOTAL_QUEUE] = {q_c, q_i};
+
   u8  fault = 0, new_bits = 0, var_detected = 0, hnb = 0,
-      first_run = (q_c->exec_cksum == 0);
+      first_run = (q[oid]->exec_cksum == 0);
 
   u64 start_us, stop_us;
 
-  s32 old_sc = objs[CONFIG_QUEUE].stage_cur, old_sm = objs[CONFIG_QUEUE].stage_max;
+  s32 old_sc = objs[oid].stage_cur, old_sm = objs[oid].stage_max;
   u32 use_tmout = exec_tmout;
-  u8* old_sn = objs[CONFIG_QUEUE].stage_name;
+  u8* old_sn = objs[oid].stage_name;
 
   /* Be a bit more generous about timeouts when resuming sessions, or when
      trying to calibrate already-added finds. This helps avoid trouble due
@@ -2748,10 +2750,10 @@ static u8 calibrate_case(char** argv, struct queue_entry* q_i, struct queue_entr
     use_tmout = MAX(exec_tmout + CAL_TMOUT_ADD,
                     exec_tmout * CAL_TMOUT_PERC / 100);
 
-  q_c->cal_failed++;
+  q[oid]->cal_failed++;
 
-  objs[CONFIG_QUEUE].stage_name = "calibration";
-  objs[CONFIG_QUEUE].stage_max  = fast_cal ? 3 : CAL_CYCLES;
+  objs[oid].stage_name = "calibration";
+  objs[oid].stage_max  = fast_cal ? 3 : CAL_CYCLES;
 
   /* Make sure the forkserver is up before we do anything, and let's not
      count its spin-up time toward binary calibration. */
@@ -2759,7 +2761,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q_i, struct queue_entr
   if (dumb_mode != 1 && !no_forkserver && !forksrv_pid)
     init_forkserver(argv);
 
-  if (q_c->exec_cksum) {
+  if (q[oid]->exec_cksum) {
 
     memcpy(first_trace, trace_bits, MAP_SIZE);
     hnb = has_new_bits(virgin_bits);
@@ -2769,14 +2771,14 @@ static u8 calibrate_case(char** argv, struct queue_entry* q_i, struct queue_entr
 
   start_us = get_cur_time_us();
 
-  for (objs[CONFIG_QUEUE].stage_cur = 0; objs[CONFIG_QUEUE].stage_cur < objs[CONFIG_QUEUE].stage_max; objs[CONFIG_QUEUE].stage_cur++) {
+  for (objs[oid].stage_cur = 0; objs[oid].stage_cur < objs[oid].stage_max; objs[oid].stage_cur++) {
 
     u32 cksum;
 
-    if (!first_run && !(objs[CONFIG_QUEUE].stage_cur % stats_update_freq)) show_stats();
+    if (!first_run && !(objs[oid].stage_cur % stats_update_freq)) show_stats();
     
     write_to_testcase(use_input_mem, q_i->len, INPUT_QUEUE);
-    write_to_testcase(use_config_mem, q_c->len, CONFIG_QUEUE);
+    write_to_testcase(use_config_mem, q[oid]->len, CONFIG_QUEUE);
     
     fault = run_target(argv, use_tmout);
 
@@ -2786,19 +2788,19 @@ static u8 calibrate_case(char** argv, struct queue_entry* q_i, struct queue_entr
     if (stop_soon || fault != crash_mode) goto abort_calibration;
 
     // TODO
-    if (!dumb_mode && !objs[CONFIG_QUEUE].stage_cur && !count_bytes(trace_bits)) {
+    if (!dumb_mode && !objs[oid].stage_cur && !count_bytes(trace_bits)) {
       fault = FAULT_NOINST;
       goto abort_calibration;
     }
 
     cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
 
-    if (q_c->exec_cksum != cksum) {
+    if (q[oid]->exec_cksum != cksum) {
 
       hnb = has_new_bits(virgin_bits);
       if (hnb > new_bits) new_bits = hnb;
 
-      if (q_c->exec_cksum) {
+      if (q[oid]->exec_cksum) {
 
         u32 i;
 
@@ -2807,7 +2809,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q_i, struct queue_entr
           if (!var_bytes[i] && first_trace[i] != trace_bits[i]) {
 
             var_bytes[i] = 1;
-            objs[CONFIG_QUEUE].stage_max    = CAL_CYCLES_LONG;
+            objs[oid].stage_max    = CAL_CYCLES_LONG;
 
           }
 
@@ -2817,7 +2819,7 @@ static u8 calibrate_case(char** argv, struct queue_entry* q_i, struct queue_entr
 
       } else {
 
-        q_c->exec_cksum = cksum;
+        q[oid]->exec_cksum = cksum;
         memcpy(first_trace, trace_bits, MAP_SIZE);
 
       }
@@ -2828,21 +2830,21 @@ static u8 calibrate_case(char** argv, struct queue_entry* q_i, struct queue_entr
 
   stop_us = get_cur_time_us();
 
-  objs[CONFIG_QUEUE].total_cal_us     += stop_us - start_us;
-  objs[CONFIG_QUEUE].total_cal_cycles += objs[CONFIG_QUEUE].stage_max;
+  objs[oid].total_cal_us     += stop_us - start_us;
+  objs[oid].total_cal_cycles += objs[oid].stage_max;
 
   /* OK, let's collect some stats about the performance of this test case.
      This is used for fuzzing air time calculations in calculate_score(). */
 
-  q_c->exec_us     = (stop_us - start_us) / objs[CONFIG_QUEUE].stage_max;
-  q_c->bitmap_size = count_bytes(trace_bits);
-  q_c->handicap    = handicap;
-  q_c->cal_failed  = 0;
+  q[oid]->exec_us     = (stop_us - start_us) / objs[oid].stage_max;
+  q[oid]->bitmap_size = count_bytes(trace_bits);
+  q[oid]->handicap    = handicap;
+  q[oid]->cal_failed  = 0;
 
-  total_bitmap_size += q_c->bitmap_size;
+  total_bitmap_size += q[oid]->bitmap_size;
   total_bitmap_entries++;
 
-  update_bitmap_score(q_c, CONFIG_QUEUE);
+  update_bitmap_score(q[oid], oid);
 
   /* If this case didn't result in new output from the instrumentation, tell
      parent. This is a non-critical problem, but something to warn the user
@@ -2852,8 +2854,8 @@ static u8 calibrate_case(char** argv, struct queue_entry* q_i, struct queue_entr
 
 abort_calibration:
 
-  if (new_bits == 2 && !q_c->has_new_cov) {
-    q_c->has_new_cov = 1;
+  if (new_bits == 2 && !q[oid]->has_new_cov) {
+    q[oid]->has_new_cov = 1;
     objs[CONFIG_QUEUE].queued_with_cov++;
   }
 
@@ -2863,16 +2865,16 @@ abort_calibration:
 
     objs[CONFIG_QUEUE].var_byte_count = count_bytes(var_bytes);
 
-    if (!q_c->var_behavior) {
-      mark_as_variable(q_c, CONFIG_QUEUE);
-      objs[CONFIG_QUEUE].queued_variable++;
+    if (!q[oid]->var_behavior) {
+      mark_as_variable(q[oid], oid);
+      objs[oid].queued_variable++;
     }
 
   }
 
-  objs[CONFIG_QUEUE].stage_name = old_sn;
-  objs[CONFIG_QUEUE].stage_cur  = old_sc;
-  objs[CONFIG_QUEUE].stage_max  = old_sm;
+  objs[oid].stage_name = old_sn;
+  objs[oid].stage_cur  = old_sc;
+  objs[oid].stage_max  = old_sm;
 
   if (!first_run) show_stats();
 
@@ -2899,7 +2901,7 @@ static void check_map_coverage(void) {
 
 /* Perform dry run of all test cases to confirm that the app is working as
    expected. This is done only for the initial inputs, and only once. */
-// TODO: how to run? COMMETED
+
 static void perform_dry_run(char** argv) {
 
   ACTF("Performing fry run...");
@@ -2944,7 +2946,8 @@ static void perform_dry_run(char** argv) {
 
       close(fd_i);
 
-      res = calibrate_case(argv, input_q, config_q, use_mem_input, use_mem_config, 0, 1);
+      calibrate_case(argv, input_q, config_q, use_mem_input, use_mem_config, 0, 1, CONFIG_QUEUE); // TODO
+      res = calibrate_case(argv, input_q, config_q, use_mem_input, use_mem_config, 0, 1, INPUT_QUEUE);
       ck_free(use_mem_config);
       ck_free(use_mem_input);
 
@@ -3343,13 +3346,15 @@ static void write_crash_readme(void) {
 /* Check if the result of an execve() during routine fuzzing is interesting,
    save or queue the input test case for further analysis if so. Returns 1 if
    entry is saved, 0 otherwise. */
-// TODO: how to save? What to save?
-static u8 save_if_interesting(char** argv, void* mem_c, u32 len_c, void* mem_i, u32 len_i, u8 fault) {
 
-  u8  *fn_i = "", *fn_c = "", *path = "";
+static u8 save_if_interesting(char** argv, void* mem_c, u32 len_c, void* mem_i, u32 len_i, u8 fault, u32 oid) {
+
+  u8  *fn = "", *path = "", *fn_i = "", *fn_c = "";
   u8  hnb;
-  s32 fd_i, fd_c;
+  s32 fd;
   u8  keeping = 0, res;
+  u8  *mem[TOTAL_QUEUE] = {mem_c, mem_i};
+  u32 len[TOTAL_QUEUE] = {len_c, len_i};
 
   if (fault == crash_mode) {
 
@@ -3363,50 +3368,37 @@ static u8 save_if_interesting(char** argv, void* mem_c, u32 len_c, void* mem_i, 
 
 #ifndef SIMPLE_FILES
 
-    fn_i = alloc_printf("%s/%s_queue/id:%06u,%s", out_dir, 
-                      queue_name[INPUT_QUEUE],
-                      objs[INPUT_QUEUE].queued_paths,
-                      describe_op(hnb, INPUT_QUEUE));
-    fn_c = alloc_printf("%s/%s_queue/id:%06u,%s", out_dir, 
-                      queue_name[CONFIG_QUEUE],
-                      objs[CONFIG_QUEUE].queued_paths,
-                      describe_op(hnb, CONFIG_QUEUE));
+    fn = alloc_printf("%s/%s_queue/id:%06u,%s", out_dir, 
+                      queue_name[oid],
+                      objs[oid].queued_paths,
+                      describe_op(hnb, oid));
 #else
 
     fn = alloc_printf("%s/queue/id_%06u", out_dir, queued_paths);
 
 #endif /* ^!SIMPLE_FILES */
 
-    add_to_queue(fn_i, len_i, 0, INPUT_QUEUE);
-    add_to_queue(fn_c, len_c, 0, CONFIG_QUEUE);
+    add_to_queue(fn, len[oid], 0, oid);
 
     if (hnb == 2) {
-      objs[INPUT_QUEUE].queue_top->has_new_cov = 1;
-      objs[INPUT_QUEUE].queued_with_cov++;
-
-      objs[CONFIG_QUEUE].queue_top->has_new_cov= 1;
-      objs[CONFIG_QUEUE].queued_with_cov++;
+      objs[oid].queue_top->has_new_cov = 1;
+      objs[oid].queued_with_cov++;
     }
 
-    objs[INPUT_QUEUE].queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
-    objs[CONFIG_QUEUE].queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
+    objs[oid].queue_top->exec_cksum = hash32(trace_bits, MAP_SIZE, HASH_CONST);
 
     /* Try to calibrate inline; this also calls update_bitmap_score() when
        successful. */
 
-    res = calibrate_case(argv, objs[INPUT_QUEUE].queue_top, objs[CONFIG_QUEUE].queue_top, mem_i, mem_c, objs[CONFIG_QUEUE].queue_cycle - 1, 0);
+    res = calibrate_case(argv, objs[INPUT_QUEUE].queue_top, objs[CONFIG_QUEUE].queue_top, mem_i, mem_c, objs[oid].queue_cycle - 1, 0, oid);
 
     if (res == FAULT_ERROR)
       FATAL("Unable to execute target application");
 
-    fd_i = open(fn_i, O_WRONLY | O_CREAT | O_EXCL, 0600);
-    fd_c = open(fn_c, O_WRONLY | O_CREAT | O_EXCL, 0600);
-    if (fd_i < 0) PFATAL("Unable to create '%s'", fn_i);
-    if (fd_c < 0) PFATAL("Unable to create '%s'", fn_c);
-    ck_write(fd_i, mem_i, len_i, fn_i);
-    ck_write(fd_c, mem_c, len_c, fn_c);
-    close(fd_i);
-    close(fd_c);
+    fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (fd < 0) PFATAL("Unable to create '%s'", fn);
+    ck_write(fd, mem[oid], len[oid], fn);
+    close(fd);
 
     keeping = 1;
 
@@ -3492,7 +3484,7 @@ keep_as_crash:
 
       total_crashes++;
 
-      if (objs[CONFIG_QUEUE].unique_crashes >= KEEP_UNIQUE_CRASH) return keeping;
+      if (objs[oid].unique_crashes >= KEEP_UNIQUE_CRASH) return keeping;
 
       if (!dumb_mode) {
 
@@ -3506,7 +3498,7 @@ keep_as_crash:
 
       }
 
-      if (!objs[CONFIG_QUEUE].unique_crashes) write_crash_readme();
+      if (!objs[oid].unique_crashes) write_crash_readme();
 
 #ifndef SIMPLE_FILES
 
@@ -3542,9 +3534,9 @@ keep_as_crash:
 
   /* If we're here, we apparently want to save the crash or hang
      test case, too. */
-  // TODO
-  fd_i = open(fn_i, O_WRONLY | O_CREAT | O_EXCL, 0600);
-  fd_c = open(fn_c, O_WRONLY | O_CREAT | O_EXCL, 0600);
+
+  u8 fd_i = open(fn_i, O_WRONLY | O_CREAT | O_EXCL, 0600);
+  u8 fd_c = open(fn_c, O_WRONLY | O_CREAT | O_EXCL, 0600);
   if (fd_i < 0) PFATAL("Unable to create '%s'", fn_i);
   if (fd_c < 0) PFATAL("Unable to create '%s'", fn_c);
   ck_write(fd_i, mem_i, len_i, fn_i);
@@ -4875,7 +4867,7 @@ abort_trimming:
    a helper function for fuzz_one(). */
 
 EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf_input, 
-                            u8* out_buf_config, u32 len_input, u32 len_config) {
+                            u8* out_buf_config, u32 len_input, u32 len_config, u32 from) {
 
   u8 fault;
 
@@ -4895,8 +4887,7 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf_input,
   if (fault == FAULT_TMOUT) {
 
     if (subseq_tmouts++ > TMOUT_LIMIT) {
-      objs[INPUT_QUEUE].cur_skipped_paths++;
-      objs[CONFIG_QUEUE].cur_skipped_paths++;
+      objs[from].cur_skipped_paths++;
       return 1;
     }
 
@@ -4908,18 +4899,16 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf_input,
   if (skip_requested) {
 
      skip_requested = 0;
-     objs[INPUT_QUEUE].cur_skipped_paths++;
-     objs[CONFIG_QUEUE].cur_skipped_paths++;
+     objs[from].cur_skipped_paths++;
      return 1;
 
   }
 
   /* This handles FAULT_ERROR for us: */
-  s32 queued_discovered = save_if_interesting(argv, out_buf_config, len_config, out_buf_input, len_input, fault);
-  objs[INPUT_QUEUE].queued_discovered += queued_discovered;
-  objs[CONFIG_QUEUE].queued_discovered += queued_discovered;
+  s32 queued_discovered = save_if_interesting(argv, out_buf_config, len_config, out_buf_input, len_input, fault, from);
+  objs[from].queued_discovered += queued_discovered;
 
-  if (!(objs[CONFIG_QUEUE].stage_cur % stats_update_freq) || objs[CONFIG_QUEUE].stage_cur + 1 == objs[CONFIG_QUEUE].stage_max)
+  if (!(objs[from].stage_cur % stats_update_freq) || objs[from].stage_cur + 1 == objs[from].stage_max)
     show_stats();
 
   return 0;
@@ -4976,7 +4965,7 @@ static u32 choose_block_len(u32 limit, u32 oid) {
 
 static u32 calculate_score(struct queue_entry* q, u32 oid) {
 
-  u32 avg_exec_us = objs[CONFIG_QUEUE].total_cal_us / objs[CONFIG_QUEUE].total_cal_cycles;
+  u32 avg_exec_us = objs[oid].total_cal_us / objs[oid].total_cal_cycles;
   u32 avg_bitmap_size = total_bitmap_size / total_bitmap_entries;
   u32 perf_score = 100;
 
@@ -5235,7 +5224,7 @@ static u8 could_be_interest(u32 old_val, u32 new_val, u8 blen, u8 check_le) {
 /* return 0 if goto abandon_entry */
 static u8 havoc(u32 oid) {
 
-  u64 havoc_queued, orig_hit_cnt, new_hit_cnt;
+  u64 orig_hit_cnt, new_hit_cnt;
   objs[oid].stage_cur_byte = -1;
 
   /* The havoc stage mutation code is also invoked when splicing files; if the
@@ -5267,7 +5256,7 @@ static u8 havoc(u32 oid) {
 
   orig_hit_cnt = objs[oid].queued_paths + objs[oid].unique_crashes;
 
-  havoc_queued = objs[oid].queued_paths;
+  mtt[oid].havoc_queued = objs[oid].queued_paths;
 
   /* We essentially just do several thousand runs (depending on perf_score)
      where we take the input file and make random stacked tweaks. */
@@ -5889,57 +5878,106 @@ static u8 fuzz_one(char** argv) {
    * CALIBRATION (only if failed earlier on) *
    *******************************************/
 
-  // if (objs[CONFIG_QUEUE].queue_cur->cal_failed) {
+  if (objs[CONFIG_QUEUE].queue_cur->cal_failed) {
 
-  //   u8 res = FAULT_TMOUT;
+    u8 res = FAULT_TMOUT;
 
-  //   if (objs[CONFIG_QUEUE].queue_cur->cal_failed < CAL_CHANCES) {
+    if (objs[CONFIG_QUEUE].queue_cur->cal_failed < CAL_CHANCES) {
 
-  //     /* Reset exec_cksum to tell calibrate_case to re-execute the testcase
-  //        avoiding the usage of an invalid trace_bits.
-  //        For more info: https://github.com/AFLplusplus/AFLplusplus/pull/425 */
+      /* Reset exec_cksum to tell calibrate_case to re-execute the testcase
+         avoiding the usage of an invalid trace_bits.
+         For more info: https://github.com/AFLplusplus/AFLplusplus/pull/425 */
 
-  //     objs[CONFIG_QUEUE].queue_cur->exec_cksum = 0;
+      objs[CONFIG_QUEUE].queue_cur->exec_cksum = 0;
 
-  //     res = calibrate_case(argv, objs[INPUT_QUEUE].queue_cur, objs[CONFIG_QUEUE].queue_cur, in_buf_i, in_buf_c, objs[CONFIG_QUEUE].queue_cycle - 1, 0);
+      res = calibrate_case(argv, objs[INPUT_QUEUE].queue_cur, objs[CONFIG_QUEUE].queue_cur, mtt[INPUT_QUEUE].in_buf, mtt[CONFIG_QUEUE].in_buf, objs[CONFIG_QUEUE].queue_cycle - 1, 0, CONFIG_QUEUE);
 
-  //     if (res == FAULT_ERROR)
-  //       FATAL("Unable to execute target application");
+      if (res == FAULT_ERROR)
+        FATAL("Unable to execute target application");
 
-  //   }
+    }
 
-  //   if (stop_soon || res != crash_mode) {
-  //     objs[CONFIG_QUEUE].cur_skipped_paths++;
-  //     goto abandon_entry;
-  //   }
+    if (stop_soon || res != crash_mode) {
+      objs[CONFIG_QUEUE].cur_skipped_paths++;
+      goto abandon_entry;
+    }
 
-  // }
+  }
+
+  if (objs[INPUT_QUEUE].queue_cur->cal_failed) {
+
+    u8 res = FAULT_TMOUT;
+
+    if (objs[INPUT_QUEUE].queue_cur->cal_failed < CAL_CHANCES) {
+
+      /* Reset exec_cksum to tell calibrate_case to re-execute the testcase
+         avoiding the usage of an invalid trace_bits.
+         For more info: https://github.com/AFLplusplus/AFLplusplus/pull/425 */
+
+      objs[INPUT_QUEUE].queue_cur->exec_cksum = 0;
+
+      res = calibrate_case(argv, objs[INPUT_QUEUE].queue_cur, objs[CONFIG_QUEUE].queue_cur, mtt[INPUT_QUEUE].in_buf, mtt[CONFIG_QUEUE].in_buf, objs[INPUT_QUEUE].queue_cycle - 1, 0, INPUT_QUEUE);
+
+      if (res == FAULT_ERROR)
+        FATAL("Unable to execute target application");
+
+    }
+
+    if (stop_soon || res != crash_mode) {
+      objs[INPUT_QUEUE].cur_skipped_paths++;
+      goto abandon_entry;
+    }
+
+  }
 
   /************
    * TRIMMING *
    ************/
 
-  // if (!dumb_mode && !objs[CONFIG_QUEUE].queue_cur->trim_done) {
+  if (!dumb_mode && !objs[CONFIG_QUEUE].queue_cur->trim_done) {
 
-  //   u8 res = trim_case(argv, objs[CONFIG_QUEUE].queue_cur, mtt[CONFIG_QUEUE].in_buf, CONFIG_QUEUE);
+    u8 res = trim_case(argv, objs[CONFIG_QUEUE].queue_cur, mtt[CONFIG_QUEUE].in_buf, CONFIG_QUEUE);
 
-  //   if (res == FAULT_ERROR)
-  //     FATAL("Unable to execute target application");
+    if (res == FAULT_ERROR)
+      FATAL("Unable to execute target application");
 
-  //   if (stop_soon) {
-  //     objs[CONFIG_QUEUE].cur_skipped_paths++;
-  //     goto abandon_entry;
-  //   }
+    if (stop_soon) {
+      objs[CONFIG_QUEUE].cur_skipped_paths++;
+      goto abandon_entry;
+    }
 
-  //   /* Don't retry trimming, even if it failed. */
+    /* Don't retry trimming, even if it failed. */
 
-  //   objs[CONFIG_QUEUE].queue_cur->trim_done = 1;
+    objs[CONFIG_QUEUE].queue_cur->trim_done = 1;
 
-  //   if (len_c != objs[CONFIG_QUEUE].queue_cur->len) len_c = objs[CONFIG_QUEUE].queue_cur->len;
+    if (mtt[CONFIG_QUEUE].len != objs[CONFIG_QUEUE].queue_cur->len) mtt[CONFIG_QUEUE].len = objs[CONFIG_QUEUE].queue_cur->len;
 
-  // }
+  }
 
-  // memcpy(out_buf_c, in_buf_c, len_c);
+  memcpy(mtt[CONFIG_QUEUE].out_buf, mtt[CONFIG_QUEUE].in_buf, mtt[CONFIG_QUEUE].len);
+
+
+  if (!dumb_mode && !objs[INPUT_QUEUE].queue_cur->trim_done) {
+
+    u8 res = trim_case(argv, objs[INPUT_QUEUE].queue_cur, mtt[INPUT_QUEUE].in_buf, INPUT_QUEUE);
+
+    if (res == FAULT_ERROR)
+      FATAL("Unable to execute target application");
+
+    if (stop_soon) {
+      objs[INPUT_QUEUE].cur_skipped_paths++;
+      goto abandon_entry;
+    }
+
+    /* Don't retry trimming, even if it failed. */
+
+    objs[INPUT_QUEUE].queue_cur->trim_done = 1;
+
+    if (mtt[INPUT_QUEUE].len != objs[INPUT_QUEUE].queue_cur->len) mtt[INPUT_QUEUE].len = objs[INPUT_QUEUE].queue_cur->len;
+
+  }
+
+  memcpy(mtt[INPUT_QUEUE].out_buf, mtt[INPUT_QUEUE].in_buf, mtt[INPUT_QUEUE].len);
 
   /*********************
    * PERFORMANCE SCORE *
@@ -5965,12 +6003,42 @@ static u8 fuzz_one(char** argv) {
   // doing_det = 1;
 
   ret_val = 0;
-havoc_stage:
-  for (int i = 0; i < 100; i++) {
-    havoc(INPUT_QUEUE);
+havoc_stage_c:
+  for (objs[CONFIG_QUEUE].stage_cur = -1; objs[CONFIG_QUEUE].stage_cur < objs[CONFIG_QUEUE].stage_max; objs[CONFIG_QUEUE].stage_cur++) {
     havoc(CONFIG_QUEUE);
     if (common_fuzz_stuff(argv, mtt[INPUT_QUEUE].out_buf, mtt[CONFIG_QUEUE].out_buf, 
-          mtt[INPUT_QUEUE].out_buf_len, mtt[CONFIG_QUEUE].out_buf_len)) {
+          mtt[INPUT_QUEUE].out_buf_len, mtt[CONFIG_QUEUE].out_buf_len, CONFIG_QUEUE)) {
+      break;
+    }
+
+    if (mtt[CONFIG_QUEUE].out_buf_len < mtt[CONFIG_QUEUE].len) 
+      mtt[CONFIG_QUEUE].out_buf = ck_realloc(mtt[CONFIG_QUEUE].out_buf, mtt[CONFIG_QUEUE].len);
+
+    mtt[CONFIG_QUEUE].out_buf_len = mtt[CONFIG_QUEUE].len;
+    memcpy(mtt[CONFIG_QUEUE].out_buf, mtt[CONFIG_QUEUE].in_buf, mtt[CONFIG_QUEUE].len);
+
+    if (objs[CONFIG_QUEUE].queued_paths != mtt[CONFIG_QUEUE].havoc_queued) {
+
+      if (mtt[CONFIG_QUEUE].perf_score <= HAVOC_MAX_MULT * 99) {
+        objs[CONFIG_QUEUE].stage_max  *= 1;
+        mtt[CONFIG_QUEUE].perf_score *= 1;
+      }
+
+      mtt[CONFIG_QUEUE].havoc_queued = objs[CONFIG_QUEUE].queued_paths;
+
+    }
+
+  }
+
+  if (splicing(CONFIG_QUEUE)) {
+    goto havoc_stage_c;
+  }
+
+havoc_stage_i:
+  for (objs[INPUT_QUEUE].stage_cur = 0; objs[INPUT_QUEUE].stage_cur < objs[INPUT_QUEUE].stage_max; objs[INPUT_QUEUE].stage_cur++) {
+    havoc(INPUT_QUEUE);
+    if (common_fuzz_stuff(argv, mtt[INPUT_QUEUE].out_buf, mtt[CONFIG_QUEUE].out_buf, 
+          mtt[INPUT_QUEUE].out_buf_len, mtt[CONFIG_QUEUE].out_buf_len, INPUT_QUEUE)) {
       break;
     }
 
@@ -5980,17 +6048,21 @@ havoc_stage:
     mtt[INPUT_QUEUE].out_buf_len = mtt[INPUT_QUEUE].len;
     memcpy(mtt[INPUT_QUEUE].out_buf, mtt[INPUT_QUEUE].in_buf, mtt[INPUT_QUEUE].len);
 
+    if (objs[INPUT_QUEUE].queued_paths != mtt[INPUT_QUEUE].havoc_queued) {
 
-    if (mtt[CONFIG_QUEUE].out_buf_len < mtt[CONFIG_QUEUE].len) 
-      mtt[CONFIG_QUEUE].out_buf = ck_realloc(mtt[CONFIG_QUEUE].out_buf, mtt[CONFIG_QUEUE].len);
+      if (mtt[INPUT_QUEUE].perf_score <= HAVOC_MAX_MULT * 100) {
+        objs[INPUT_QUEUE].stage_max  *= 2;
+        mtt[INPUT_QUEUE].perf_score *= 2;
+      }
 
-    mtt[CONFIG_QUEUE].out_buf_len = mtt[CONFIG_QUEUE].len;
-    memcpy(mtt[CONFIG_QUEUE].out_buf, mtt[CONFIG_QUEUE].in_buf, mtt[CONFIG_QUEUE].len);
+      mtt[INPUT_QUEUE].havoc_queued = objs[INPUT_QUEUE].queued_paths;
+
+    }
 
   }
 
-  if (splicing(INPUT_QUEUE) && splicing(CONFIG_QUEUE)) {
-    goto havoc_stage;
+  if (splicing(INPUT_QUEUE)) {
+    goto havoc_stage_i;
   }
 
 abandon_entry:
@@ -7474,6 +7546,7 @@ int main(int argc, char** argv) {
     u8 skipped_fuzz;
 
     cull_queue(CONFIG_QUEUE);
+    cull_queue(INPUT_QUEUE);
 
     if (!objs[CONFIG_QUEUE].queue_cur) {
 
