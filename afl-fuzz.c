@@ -67,6 +67,8 @@
 #include <sys/ioctl.h>
 #include <sys/file.h>
 
+#include <math.h>
+
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined (__OpenBSD__)
 #  include <sys/sysctl.h>
 #endif /* __APPLE__ || __FreeBSD__ || __OpenBSD__ */
@@ -359,11 +361,18 @@ struct mutator {
   u64 havoc_queued;
 };
 
-
 enum queue_type {
   CONFIG_QUEUE,
   INPUT_QUEUE,
   TOTAL_QUEUE,
+};
+
+struct exp3_state {
+  u32 t, nbArms;
+  float gamma;
+  float weights[TOTAL_QUEUE];
+  float rewards[TOTAL_QUEUE];
+  float trusts[TOTAL_QUEUE];
 };
 
 char* queue_name[] = {
@@ -435,6 +444,133 @@ enum {
       printf("%02X ", mtt[(q)].in_buf[i]); \
     } \
   } while (0)
+
+static inline u32 UR(u32 limit);
+
+static void EXP3_init(struct exp3_state* s, float gamma) {
+
+  int i;
+
+  s->t = 0;
+  s->nbArms = TOTAL_QUEUE;
+
+  for (i = 0; i < s->nbArms; i++) {
+
+    s->weights[i] = 1.f / s->nbArms;
+    s->rewards[i] = 0;
+    s->trusts[i] = 1.f / s->nbArms;
+
+  }
+
+}
+
+
+static float EXP3_sum(float* arr, s32 n) {
+
+  float sum;
+  int i;
+
+  sum = 0.f;
+  for (i = 0; i < n; i++) {
+    sum += arr[i];
+  }
+
+  return sum;
+}
+
+
+/* Update trusts */
+// https://github.com/SMPyBandits/SMPyBandits/blob/master/SMPyBandits/Policies/Exp3.py#L67
+static void EXP3_trusts(struct exp3_state* s) {
+
+  float sum;
+  int i;
+
+  for (i = 0; i < s->nbArms; i++) {
+
+    s->trusts[i] = ((1.f - s->gamma) * s->weights[i]) + (s->gamma / s->nbArms);
+
+    if (isinf(s->trusts[i])) s->trusts[i] = 0;
+
+  }
+
+  sum = EXP3_sum(s->trusts, s->nbArms);
+
+  if (sum <= 1e-8) {
+
+    for (int i = 0; i < s->nbArms; i++) {
+      s->trusts[i] = 1.f / s->nbArms;
+    }
+
+  }
+
+  for (i = 0; i < s->nbArms; i++) {
+    s->trusts[i] /= sum;
+  }
+
+}
+
+/* Give a reward: increase t and update the weight */
+// https://github.com/SMPyBandits/SMPyBandits/blob/master/SMPyBandits/Policies/Exp3.py#L89
+static void EXP3_get_reward(struct exp3_state* s, float reward, u32 arm) {
+
+  float sum;
+  int i;
+
+  if (arm < 0 || arm >= s->nbArms) PFATAL("Wrong arm.");
+
+  s->t++;
+  s->rewards[arm] += reward;
+
+  EXP3_trusts(s);
+  reward /= s->trusts[arm];
+
+  s->weights[arm] *= expf(reward * (s->gamma / s->nbArms));
+
+  sum = EXP3_sum(s->weights, s->nbArms);
+  
+  for (i = 0; i < s->nbArms; i++) {
+
+    s->weights[i] /= sum;
+
+  }
+  
+}
+
+
+static s32 EXP3_weighted_random(float* trusts, s32 nbArms) {
+
+  float sum, rnd;
+  int i;
+
+  sum = EXP3_sum(trusts, nbArms);
+  rnd = (float)UR(RAND_MAX) / (float)RAND_MAX * sum;
+  for (i = 0; i < nbArms; i++) {
+
+    if (rnd < trusts[i])
+      return i;
+
+    rnd -= trusts[i];
+
+  }
+
+  PFATAL("EXP3_weighted_random");
+  
+}
+
+
+/* Choose randomly accordingly to the trusts */
+// https://github.com/SMPyBandits/SMPyBandits/blob/master/SMPyBandits/Policies/Exp3.py#L111
+static s32 EXP3_choice(struct exp3_state* s) {
+  
+  if (s->t < s->nbArms) {
+    return s->t;
+  } else {
+    EXP3_trusts(s);
+    return EXP3_weighted_random(s->trusts, s->nbArms);
+  }
+
+}
 
 /* Get unix time in milliseconds */
 
@@ -4867,7 +5003,8 @@ abort_trimming:
    a helper function for fuzz_one(). */
 
 EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf_input, 
-                            u8* out_buf_config, u32 len_input, u32 len_config, u32 from) {
+                            u8* out_buf_config, u32 len_input, u32 len_config, u32 from,
+                            struct exp3_state* s) {
 
   u8 fault;
 
@@ -4906,6 +5043,11 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf_input,
 
   /* This handles FAULT_ERROR for us: */
   s32 queued_discovered = save_if_interesting(argv, out_buf_config, len_config, out_buf_input, len_input, fault, from);
+  
+  if (queued_discovered) {
+    EXP3_get_reward(s, 1.f, from);
+  }
+  
   objs[from].queued_discovered += queued_discovered;
 
   if (!(objs[from].stage_cur % stats_update_freq) || objs[from].stage_cur + 1 == objs[from].stage_max)
@@ -5229,28 +5371,6 @@ static u8 havoc(u32 oid) {
 
   /* The havoc stage mutation code is also invoked when splicing files; if the
      splice_cycle variable is set, generate different descriptions and such. */
-
-  if (!mtt[oid].splice_cycle) {
-
-    objs[oid].stage_name  = "havoc";
-    objs[oid].stage_short = "havoc";
-    objs[oid].stage_max   = (mtt[oid].doing_det ? HAVOC_CYCLES_INIT : HAVOC_CYCLES) *
-                  mtt[oid].perf_score / objs[oid].havoc_div / 100;
-
-  } else {
-
-    static u8 tmp[32];
-
-    mtt[oid].perf_score = mtt[oid].orig_perf;
-
-    sprintf(tmp, "splice %u", mtt[oid].splice_cycle);
-    objs[oid].stage_name  = tmp;
-    objs[oid].stage_short = "splice";
-    objs[oid].stage_max   = SPLICE_HAVOC * mtt[oid].perf_score / objs[oid].havoc_div / 100;
-
-  }
-
-  if (objs[oid].stage_max < HAVOC_MIN) objs[oid].stage_max = HAVOC_MIN;
 
   mtt[oid].out_buf_len = mtt[oid].len;
 
@@ -5776,7 +5896,7 @@ retry_splicing:
    function is a tad too long... returns 0 if fuzzed successfully, 1 if
    skipped or bailed out. */
 
-static u8 fuzz_one(char** argv) {
+static u8 fuzz_one(char** argv, s32 id, struct exp3_state* s) {
 
   u32 prev_cksum, eff_cnt = 1;
 
@@ -6003,66 +6123,59 @@ static u8 fuzz_one(char** argv) {
   // doing_det = 1;
 
   ret_val = 0;
-havoc_stage_c:
-  for (objs[CONFIG_QUEUE].stage_cur = -1; objs[CONFIG_QUEUE].stage_cur < objs[CONFIG_QUEUE].stage_max; objs[CONFIG_QUEUE].stage_cur++) {
-    havoc(CONFIG_QUEUE);
+
+havoc_stage:
+
+  if (!mtt[id].splice_cycle) {
+
+  objs[id].stage_name  = "havoc";
+  objs[id].stage_short = "havoc";
+  objs[id].stage_max   = (mtt[id].doing_det ? HAVOC_CYCLES_INIT : HAVOC_CYCLES) *
+                mtt[id].perf_score / objs[id].havoc_div / 100;
+
+  } else {
+
+    static u8 tmp[32];
+
+    mtt[id].perf_score = mtt[id].orig_perf;
+
+    sprintf(tmp, "splice %u", mtt[id].splice_cycle);
+    objs[id].stage_name  = tmp;
+    objs[id].stage_short = "splice";
+    objs[id].stage_max   = SPLICE_HAVOC * mtt[id].perf_score / objs[id].havoc_div / 100;
+
+  }
+
+  if (objs[id].stage_max < HAVOC_MIN) objs[id].stage_max = HAVOC_MIN;
+
+  for (objs[id].stage_cur = -1; objs[id].stage_cur < objs[id].stage_max; objs[id].stage_cur++) {
+    havoc(id);
     if (common_fuzz_stuff(argv, mtt[INPUT_QUEUE].out_buf, mtt[CONFIG_QUEUE].out_buf, 
-          mtt[INPUT_QUEUE].out_buf_len, mtt[CONFIG_QUEUE].out_buf_len, CONFIG_QUEUE)) {
+          mtt[INPUT_QUEUE].out_buf_len, mtt[CONFIG_QUEUE].out_buf_len, id, s)) {
       break;
     }
 
-    if (mtt[CONFIG_QUEUE].out_buf_len < mtt[CONFIG_QUEUE].len) 
-      mtt[CONFIG_QUEUE].out_buf = ck_realloc(mtt[CONFIG_QUEUE].out_buf, mtt[CONFIG_QUEUE].len);
+    if (mtt[id].out_buf_len < mtt[id].len) 
+      mtt[id].out_buf = ck_realloc(mtt[id].out_buf, mtt[id].len);
 
-    mtt[CONFIG_QUEUE].out_buf_len = mtt[CONFIG_QUEUE].len;
-    memcpy(mtt[CONFIG_QUEUE].out_buf, mtt[CONFIG_QUEUE].in_buf, mtt[CONFIG_QUEUE].len);
+    mtt[id].out_buf_len = mtt[id].len;
+    memcpy(mtt[id].out_buf, mtt[id].in_buf, mtt[id].len);
 
-    if (objs[CONFIG_QUEUE].queued_paths != mtt[CONFIG_QUEUE].havoc_queued) {
+    if (objs[id].queued_paths != mtt[id].havoc_queued) {
 
-      if (mtt[CONFIG_QUEUE].perf_score <= HAVOC_MAX_MULT * 99) {
-        objs[CONFIG_QUEUE].stage_max  *= 1;
-        mtt[CONFIG_QUEUE].perf_score *= 1;
+      if (mtt[id].perf_score <= HAVOC_MAX_MULT * 100) {
+        objs[id].stage_max  *= 2;
+        mtt[id].perf_score *= 2;
       }
 
-      mtt[CONFIG_QUEUE].havoc_queued = objs[CONFIG_QUEUE].queued_paths;
+      mtt[id].havoc_queued = objs[id].queued_paths;
 
     }
 
   }
 
-  if (splicing(CONFIG_QUEUE)) {
-    goto havoc_stage_c;
-  }
-
-havoc_stage_i:
-  for (objs[INPUT_QUEUE].stage_cur = 0; objs[INPUT_QUEUE].stage_cur < objs[INPUT_QUEUE].stage_max; objs[INPUT_QUEUE].stage_cur++) {
-    havoc(INPUT_QUEUE);
-    if (common_fuzz_stuff(argv, mtt[INPUT_QUEUE].out_buf, mtt[CONFIG_QUEUE].out_buf, 
-          mtt[INPUT_QUEUE].out_buf_len, mtt[CONFIG_QUEUE].out_buf_len, INPUT_QUEUE)) {
-      break;
-    }
-
-    if (mtt[INPUT_QUEUE].out_buf_len < mtt[INPUT_QUEUE].len) 
-      mtt[INPUT_QUEUE].out_buf = ck_realloc(mtt[INPUT_QUEUE].out_buf, mtt[INPUT_QUEUE].len);
-
-    mtt[INPUT_QUEUE].out_buf_len = mtt[INPUT_QUEUE].len;
-    memcpy(mtt[INPUT_QUEUE].out_buf, mtt[INPUT_QUEUE].in_buf, mtt[INPUT_QUEUE].len);
-
-    if (objs[INPUT_QUEUE].queued_paths != mtt[INPUT_QUEUE].havoc_queued) {
-
-      if (mtt[INPUT_QUEUE].perf_score <= HAVOC_MAX_MULT * 100) {
-        objs[INPUT_QUEUE].stage_max  *= 2;
-        mtt[INPUT_QUEUE].perf_score *= 2;
-      }
-
-      mtt[INPUT_QUEUE].havoc_queued = objs[INPUT_QUEUE].queued_paths;
-
-    }
-
-  }
-
-  if (splicing(INPUT_QUEUE)) {
-    goto havoc_stage_i;
+  if (splicing(id)) {
+    goto havoc_stage;
   }
 
 abandon_entry:
@@ -7541,6 +7654,10 @@ int main(int argc, char** argv) {
     if (stop_soon) goto stop_fuzzing;
   }
 
+  struct exp3_state* s = ck_alloc(sizeof(struct exp3_state));
+
+  EXP3_init(s, 0.75f);
+
   while (1) {
 
     u8 skipped_fuzz;
@@ -7620,7 +7737,11 @@ int main(int argc, char** argv) {
 
     }
 
-    skipped_fuzz = fuzz_one(use_argv);
+    s32 id = EXP3_choice(s);
+
+    ACTF("Choosing queue: %s", queue_name[id]);
+
+    skipped_fuzz = fuzz_one(use_argv, id, s);
 
     // if (!stop_soon && sync_id && !skipped_fuzz) {
       
