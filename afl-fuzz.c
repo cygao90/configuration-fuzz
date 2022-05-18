@@ -5903,7 +5903,9 @@ static u8 fuzz_one(char** argv, s32 id, struct exp3_state* s) {
   u8  ret_val = 1;
 
   u8  a_collect[MAX_AUTO_EXTRA];
-  u32 a_len = 0;
+  u32 a_len = 0, i;
+
+  u64 orig_hit_cnt, new_hit_cnt;
 
   // struct mutator mutator_c, mutator_i;
 
@@ -6122,16 +6124,23 @@ static u8 fuzz_one(char** argv, s32 id, struct exp3_state* s) {
 
   // doing_det = 1;
 
-  ret_val = 0;
+  /****************
+   * RANDOM HAVOC *
+   ****************/
 
 havoc_stage:
 
+  objs[id].stage_cur_byte = -1;
+
+  /* The havoc stage mutation code is also invoked when splicing files; if the
+     splice_cycle variable is set, generate different descriptions and such. */
+
   if (!mtt[id].splice_cycle) {
 
-  objs[id].stage_name  = "havoc";
-  objs[id].stage_short = "havoc";
-  objs[id].stage_max   = (mtt[id].doing_det ? HAVOC_CYCLES_INIT : HAVOC_CYCLES) *
-                mtt[id].perf_score / objs[id].havoc_div / 100;
+    objs[id].stage_name  = "havoc";
+    objs[id].stage_short = "havoc";
+    objs[id].stage_max   = (mtt[id].doing_det ? HAVOC_CYCLES_INIT : HAVOC_CYCLES) *
+                  mtt[id].perf_score / objs[id].havoc_div / 100;
 
   } else {
 
@@ -6148,18 +6157,415 @@ havoc_stage:
 
   if (objs[id].stage_max < HAVOC_MIN) objs[id].stage_max = HAVOC_MIN;
 
-  for (objs[id].stage_cur = -1; objs[id].stage_cur < objs[id].stage_max; objs[id].stage_cur++) {
-    havoc(id);
-    if (common_fuzz_stuff(argv, mtt[INPUT_QUEUE].out_buf, mtt[CONFIG_QUEUE].out_buf, 
-          mtt[INPUT_QUEUE].out_buf_len, mtt[CONFIG_QUEUE].out_buf_len, id, s)) {
-      break;
+  mtt[id].out_buf_len = mtt[id].len;
+
+  orig_hit_cnt = objs[id].queued_paths + objs[id].unique_crashes;
+
+  mtt[id].havoc_queued = objs[id].queued_paths;
+
+  /* We essentially just do several thousand runs (depending on perf_score)
+     where we take the input file and make random stacked tweaks. */
+
+  for (objs[id].stage_cur = 0; objs[id].stage_cur < objs[id].stage_max; objs[id].stage_cur++) {
+
+    u32 use_stacking = 1 << (1 + UR(HAVOC_STACK_POW2));
+
+    objs[id].stage_cur_val = use_stacking;
+ 
+    for (i = 0; i < use_stacking; i++) {
+
+      switch (UR(15 + ((extras_cnt + a_extras_cnt) ? 2 : 0))) {
+
+        case 0:
+
+          /* Flip a single bit somewhere. Spooky! */
+
+          FLIP_BIT(mtt[id].out_buf, UR(mtt[id].out_buf_len << 3));
+          
+          break;
+
+        case 1: 
+
+          /* Set byte to interesting value. */
+
+          mtt[id].out_buf[UR(mtt[id].out_buf_len)] = interesting_8[UR(sizeof(interesting_8))];
+          
+          break;
+
+        case 2:
+
+          /* Set word to interesting value, randomly choosing endian. */
+
+          if (mtt[id].out_buf_len < 2) break;
+
+          if (UR(2)) {
+
+            *(u16*)(mtt[id].out_buf + UR(mtt[id].out_buf_len - 1)) =
+              interesting_16[UR(sizeof(interesting_16) >> 1)];
+
+          } else {
+
+            *(u16*)(mtt[id].out_buf + UR(mtt[id].out_buf_len - 1)) = SWAP16(
+              interesting_16[UR(sizeof(interesting_16) >> 1)]);
+
+          }
+
+          break;
+
+        case 3:
+
+          /* Set dword to interesting value, randomly choosing endian. */
+
+          if (mtt[id].out_buf_len < 4) break;
+
+          if (UR(2)) {
+
+            *(u32*)(mtt[id].out_buf + UR(mtt[id].out_buf_len - 3)) =
+              interesting_32[UR(sizeof(interesting_32) >> 2)];
+
+          } else {
+
+            *(u32*)(mtt[id].out_buf + UR(mtt[id].out_buf_len - 3)) = SWAP32(
+              interesting_32[UR(sizeof(interesting_32) >> 2)]);
+
+          }
+
+          break;
+
+        case 4:
+
+          /* Randomly subtract from byte. */
+
+          mtt[id].out_buf[UR(mtt[id].out_buf_len)] -= 1 + UR(ARITH_MAX);
+          
+          break;
+
+        case 5:
+
+          /* Randomly add to byte. */
+
+          mtt[id].out_buf[UR(mtt[id].out_buf_len)] += 1 + UR(ARITH_MAX);
+          
+          break;
+
+        case 6:
+
+          /* Randomly subtract from word, random endian. */
+
+          if (mtt[id].out_buf_len < 2) break;
+
+          if (UR(2)) {
+
+            u32 pos = UR(mtt[id].out_buf_len - 1);
+
+            *(u16*)(mtt[id].out_buf + pos) -= 1 + UR(ARITH_MAX);
+
+          } else {
+
+            u32 pos = UR(mtt[id].out_buf_len - 1);
+            u16 num = 1 + UR(ARITH_MAX);
+
+            *(u16*)(mtt[id].out_buf + pos) =
+              SWAP16(SWAP16(*(u16*)(mtt[id].out_buf + pos)) - num);
+
+          }
+
+
+          break;
+
+        case 7:
+
+          /* Randomly add to word, random endian. */
+
+          if (mtt[id].out_buf_len < 2) break;
+
+          if (UR(2)) {
+
+            u32 pos = UR(mtt[id].out_buf_len - 1);
+
+            *(u16*)(mtt[id].out_buf + pos) += 1 + UR(ARITH_MAX);
+
+          } else {
+
+            u32 pos = UR(mtt[id].out_buf_len - 1);
+            u16 num = 1 + UR(ARITH_MAX);
+
+            *(u16*)(mtt[id].out_buf + pos) =
+              SWAP16(SWAP16(*(u16*)(mtt[id].out_buf + pos)) + num);
+
+          }
+
+          break;
+
+        case 8:
+
+          /* Randomly subtract from dword, random endian. */
+
+          if (mtt[id].out_buf_len < 4) break;
+
+          if (UR(2)) {
+
+            u32 pos = UR(mtt[id].out_buf_len - 3);
+
+            *(u32*)(mtt[id].out_buf + pos) -= 1 + UR(ARITH_MAX);
+
+          } else {
+
+            u32 pos = UR(mtt[id].out_buf_len - 3);
+            u32 num = 1 + UR(ARITH_MAX);
+
+            *(u32*)(mtt[id].out_buf + pos) =
+              SWAP32(SWAP32(*(u32*)(mtt[id].out_buf + pos)) - num);
+
+          }
+
+          break;
+
+        case 9:
+
+          /* Randomly add to dword, random endian. */
+
+          if (mtt[id].out_buf_len < 4) break;
+
+          if (UR(2)) {
+
+            u32 pos = UR(mtt[id].out_buf_len - 3);
+
+            *(u32*)(mtt[id].out_buf + pos) += 1 + UR(ARITH_MAX);
+
+          } else {
+
+            u32 pos = UR(mtt[id].out_buf_len - 3);
+            u32 num = 1 + UR(ARITH_MAX);
+
+            *(u32*)(mtt[id].out_buf + pos) =
+              SWAP32(SWAP32(*(u32*)(mtt[id].out_buf + pos)) + num);
+
+          }
+
+          break;
+
+        case 10:
+
+          /* Just set a random byte to a random value. Because,
+              why not. We use XOR with 1-255 to eliminate the
+              possibility of a no-op. */
+
+          mtt[id].out_buf[UR(mtt[id].out_buf_len)] ^= 1 + UR(255);
+          
+          break;
+
+        case 11 ... 12: {
+
+          /* Delete bytes. We're making this a bit more likely
+              than insertion (the next option) in hopes of keeping
+              files reasonably small. */
+
+          u32 del_from, del_len;
+
+          if (mtt[id].out_buf_len < 2) break;
+
+          /* Don't delete too much. */
+
+          del_len = choose_block_len(mtt[id].out_buf_len - 1, id);
+
+          del_from = UR(mtt[id].out_buf_len - del_len + 1);
+
+          memmove(mtt[id].out_buf + del_from, mtt[id].out_buf + del_from + del_len,
+                  mtt[id].out_buf_len - del_from - del_len);
+
+          mtt[id].out_buf_len -= del_len;
+
+          break;
+
+        }
+
+        case 13:
+
+          if (mtt[id].out_buf_len + HAVOC_BLK_XL < MAX_FILE) {
+
+            /* Clone bytes (75%) or insert a block of constant bytes (25%). */
+
+            u8  actually_clone = UR(4);
+            u32 clone_from, clone_to, clone_len;
+            u8* new_buf;
+
+            if (actually_clone) {
+
+              clone_len  = choose_block_len(mtt[id].out_buf_len, id);
+              clone_from = UR(mtt[id].out_buf_len - clone_len + 1);
+
+            } else {
+
+              clone_len = choose_block_len(HAVOC_BLK_XL, id);
+              clone_from = 0;
+
+            }
+
+            clone_to   = UR(mtt[id].out_buf_len);
+
+            new_buf = ck_alloc_nozero(mtt[id].out_buf_len + clone_len);
+
+            /* Head */
+
+            memcpy(new_buf, mtt[id].out_buf, clone_to);
+
+            /* Inserted part */
+
+            if (actually_clone)
+              memcpy(new_buf + clone_to, mtt[id].out_buf + clone_from, clone_len);
+            else
+              memset(new_buf + clone_to,
+                      UR(2) ? UR(256) : mtt[id].out_buf[UR(mtt[id].out_buf_len)], clone_len);
+
+            /* Tail */
+            memcpy(new_buf + clone_to + clone_len, mtt[id].out_buf + clone_to,
+                    mtt[id].out_buf_len - clone_to);
+
+            ck_free(mtt[id].out_buf);
+            mtt[id].out_buf = new_buf;
+            mtt[id].out_buf_len += clone_len;
+
+          }
+
+          break;
+
+        case 14: {
+
+          /* Overwrite bytes with a randomly selected chunk (75%) or fixed
+              bytes (25%). */
+
+          u32 copy_from, copy_to, copy_len;
+
+          if (mtt[id].out_buf_len < 2) break;
+
+          copy_len  = choose_block_len(mtt[id].out_buf_len - 1, id);
+
+          copy_from = UR(mtt[id].out_buf_len - copy_len + 1);
+          copy_to   = UR(mtt[id].out_buf_len - copy_len + 1);
+
+          if (UR(4)) {
+
+            if (copy_from != copy_to)
+              memmove(mtt[id].out_buf + copy_to, mtt[id].out_buf + copy_from, copy_len);
+
+          } else memset(mtt[id].out_buf + copy_to,
+                        UR(2) ? UR(256) : mtt[id].out_buf[UR(mtt[id].out_buf_len)], copy_len);
+
+          break;
+
+        }
+
+        /* Values 15 and 16 can be selected only if there are any extras
+          present in the dictionaries. */
+
+        case 15: {
+
+          /* Overwrite bytes with an extra. */
+
+          if (!extras_cnt || (a_extras_cnt && UR(2))) {
+
+            /* No user-specified extras or odds in our favor. Let's use an
+                auto-detected one. */
+
+            u32 use_extra = UR(a_extras_cnt);
+            u32 extra_len = a_extras[use_extra].len;
+            u32 insert_at;
+
+            if (extra_len > mtt[id].out_buf_len) break;
+
+            insert_at = UR(mtt[id].out_buf_len - extra_len + 1);
+            memcpy(mtt[id].out_buf + insert_at, a_extras[use_extra].data, extra_len);
+
+          } else {
+
+            /* No auto extras or odds in our favor. Use the dictionary. */
+
+            u32 use_extra = UR(extras_cnt);
+            u32 extra_len = extras[use_extra].len;
+            u32 insert_at;
+
+            if (extra_len > mtt[id].out_buf_len) break;
+
+            insert_at = UR(mtt[id].out_buf_len - extra_len + 1);
+            memcpy(mtt[id].out_buf + insert_at, extras[use_extra].data, extra_len);
+
+          }
+
+          break;
+
+        }
+
+        case 16: {
+
+            u32 use_extra, extra_len, insert_at = UR(mtt[id].out_buf_len + 1);
+            u8* new_buf;
+
+            /* Insert an extra. Do the same dice-rolling stuff as for the
+                previous case. */
+
+            if (!extras_cnt || (a_extras_cnt && UR(2))) {
+
+              use_extra = UR(a_extras_cnt);
+              extra_len = a_extras[use_extra].len;
+
+              if (mtt[id].out_buf_len + extra_len >= MAX_FILE) break;
+
+              new_buf = ck_alloc_nozero(mtt[id].out_buf_len + extra_len);
+
+              /* Head */
+              memcpy(new_buf, mtt[id].out_buf, insert_at);
+
+              /* Inserted part */
+              memcpy(new_buf + insert_at, a_extras[use_extra].data, extra_len);
+
+            } else {
+
+              use_extra = UR(extras_cnt);
+              extra_len = extras[use_extra].len;
+
+              if (mtt[id].out_buf_len + extra_len >= MAX_FILE) break;
+
+              new_buf = ck_alloc_nozero(mtt[id].out_buf_len + extra_len);
+
+              /* Head */
+              memcpy(new_buf, mtt[id].out_buf, insert_at);
+
+              /* Inserted part */
+              memcpy(new_buf + insert_at, extras[use_extra].data, extra_len);
+
+            }
+
+            /* Tail */
+            memcpy(new_buf + insert_at + extra_len, mtt[id].out_buf + insert_at,
+                    mtt[id].out_buf_len - insert_at);
+
+            ck_free(mtt[id].out_buf);
+            mtt[id].out_buf   = new_buf;
+            mtt[id].out_buf_len += extra_len;
+
+            break;
+
+          }
+      }
+
     }
+
+    if (common_fuzz_stuff(argv, mtt[INPUT_QUEUE].out_buf, mtt[CONFIG_QUEUE].out_buf, 
+          mtt[INPUT_QUEUE].out_buf_len, mtt[CONFIG_QUEUE].out_buf_len, id, s))
+      goto abandon_entry;
+
+    /* out_buf might have been mangled a bit, so let's restore it to its
+       original size and shape. */
 
     if (mtt[id].out_buf_len < mtt[id].len) 
       mtt[id].out_buf = ck_realloc(mtt[id].out_buf, mtt[id].len);
 
     mtt[id].out_buf_len = mtt[id].len;
     memcpy(mtt[id].out_buf, mtt[id].in_buf, mtt[id].len);
+
+    /* If we're finding new stuff, let's run for a bit longer, limits
+       permitting. */
 
     if (objs[id].queued_paths != mtt[id].havoc_queued) {
 
@@ -6174,9 +6580,109 @@ havoc_stage:
 
   }
 
-  if (splicing(id)) {
-    goto havoc_stage;
+  new_hit_cnt = objs[id].queued_paths + objs[id].unique_crashes;
+
+  if (!mtt[id].splice_cycle) {
+    objs[id].stage_finds[STAGE_HAVOC]  += new_hit_cnt - orig_hit_cnt;
+    objs[id].stage_cycles[STAGE_HAVOC] += objs[id].stage_max;
+  } else {
+    objs[id].stage_finds[STAGE_SPLICE]  += new_hit_cnt - orig_hit_cnt;
+    objs[id].stage_cycles[STAGE_SPLICE] += objs[id].stage_max;
   }
+
+#ifndef IGNORE_FINDS
+
+  /************
+   * SPLICING *
+   ************/
+
+  /* This is a last-resort strategy triggered by a full round with no findings.
+     It takes the current input file, randomly selects another input, and
+     splices them together at some offset, then relies on the havoc
+     code to mutate that blob. */
+
+retry_splicing:
+
+  if (objs[id].use_splicing && mtt[id].splice_cycle++ < SPLICE_CYCLES &&
+      objs[id].queued_paths > 1 && objs[id].queue_cur->len > 1) {
+
+    struct queue_entry* target;
+    u32 tid, split_at;
+    u8* new_buf;
+    s32 f_diff, l_diff;
+
+    /* First of all, if we've modified in_buf for havoc, let's clean that
+       up... */
+
+    if (mtt[id].in_buf != mtt[id].orig_in) {
+      ck_free(mtt[id].in_buf);
+      mtt[id].in_buf = mtt[id].orig_in;
+      mtt[id].len = objs[id].queue_cur->len;
+    }
+
+    /* Pick a random queue entry and seek to it. Don't splice with yourself. */
+
+    do { tid = UR(objs[id].queued_paths); } while (tid == objs[id].current_entry);
+
+    objs[id].splicing_with = tid;
+    target = objs[id].queue;
+
+    while (tid >= 100) { target = target->next_100; tid -= 100; }
+    while (tid--) target = target->next;
+
+    /* Make sure that the target has a reasonable length. */
+
+    while (target && (target->len < 2 || target == objs[id].queue_cur)) {
+      target = target->next;
+      objs[id].splicing_with++;
+    }
+
+    if (!target) goto retry_splicing;
+
+    /* Read the testcase into a new buffer. */
+
+    mtt[id].fd = open(target->fname, O_RDONLY);
+
+    if (mtt[id].fd < 0) PFATAL("Unable to open '%s'", target->fname);
+
+    new_buf = ck_alloc_nozero(target->len);
+
+    ck_read(mtt[id].fd, new_buf, target->len, target->fname);
+
+    close(mtt[id].fd);
+
+    /* Find a suitable splicing location, somewhere between the first and
+       the last differing byte. Bail out if the difference is just a single
+       byte or so. */
+
+    locate_diffs(mtt[id].in_buf, new_buf, MIN(mtt[id].len, target->len), &f_diff, &l_diff);
+
+    if (f_diff < 0 || l_diff < 2 || f_diff == l_diff) {
+      ck_free(new_buf);
+      goto retry_splicing;
+    }
+
+    /* Split somewhere between the first and last differing byte. */
+
+    split_at = f_diff + UR(l_diff - f_diff);
+
+    /* Do the thing. */
+
+    mtt[id].len = target->len;
+    memcpy(new_buf, mtt[id].in_buf, split_at);
+    mtt[id].in_buf = new_buf;
+
+    ck_free(mtt[id].out_buf);
+    mtt[id].out_buf = ck_alloc_nozero(mtt[id].len);
+    memcpy(mtt[id].out_buf, mtt[id].in_buf, mtt[id].len);
+
+    goto havoc_stage;
+
+  }
+
+#endif /* !IGNORE_FINDS */
+
+  ret_val = 0;
 
 abandon_entry:
 
@@ -7798,6 +8304,7 @@ stop_fuzzing:
   destroy_extras();
   ck_free(target_path);
   ck_free(sync_id);
+  ck_free(s);
 
   alloc_report();
 
