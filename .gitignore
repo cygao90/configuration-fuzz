@@ -20,3 +20,4 @@ afl-llvm-rt-64.o
 afl-llvm-rt.o
 
 test/
+argv_fuzzing/*.so

@@ -5110,8 +5110,7 @@ static u32 calculate_score(struct queue_entry* q, u32 oid, struct queue_entry* q
     u32 avg_bitmap_size = total_bitmap_size / total_bitmap_entries;
     u32 perf_score = 100;
 
-    */
-        /* Adjust score based on execution speed of this path, compared to the
+          /* Adjust score based on execution speed of this path, compared to the
            global average. Multiplier ranges from 0.1x to 3x. Fast inputs are
            less expensive to fuzz, so we're giving them more air time. */
 
@@ -5182,7 +5181,7 @@ static u32 calculate_score(struct queue_entry* q, u32 oid, struct queue_entry* q
 /* Calculate case desirability score to adjust the length of havoc fuzzing.
    A helper function for fuzz_one(). Maybe some of these constants should
    go into config.h. */
-//time 2022 5 20 ¼ÆËã
+//time 2022 5 20 ï¿½ï¿½ï¿½ï¿½
 /*static u32 calculate_score(struct queue_entry* q, u32 oid) {
 
   u32 avg_exec_us = objs[oid].total_cal_us / objs[oid].total_cal_cycles;
@@ -6184,7 +6183,7 @@ static u8 fuzz_one(char** argv, s32 id, struct exp3_state* s) {
    *********************/
   mtt[CONFIG_QUEUE].orig_perf = mtt[CONFIG_QUEUE].perf_score = calculate_score(objs[CONFIG_QUEUE].queue_cur, CONFIG_QUEUE, objs[INPUT_QUEUE].queue_cur, INPUT_QUEUE);
   mtt[INPUT_QUEUE].orig_perf = mtt[INPUT_QUEUE].perf_score = calculate_score(objs[INPUT_QUEUE].queue_cur, INPUT_QUEUE, objs[CONFIG_QUEUE].queue_cur, CONFIG_QUEUE);
-  //2022 5 20 ¼ÆËã
+  //2022 5 20 ï¿½ï¿½ï¿½ï¿½
   // mtt[CONFIG_QUEUE].orig_perf = mtt[CONFIG_QUEUE].perf_score = calculate_score(objs[CONFIG_QUEUE].queue_cur, CONFIG_QUEUE);
  // mtt[INPUT_QUEUE].orig_perf = mtt[INPUT_QUEUE].perf_score = calculate_score(objs[INPUT_QUEUE].queue_cur, INPUT_QUEUE);
 
@@ -8169,11 +8168,6 @@ int main(int argc, char** argv) {
   if (dumb_mode == 2 && no_forkserver)
     FATAL("AFL_DUMB_FORKSRV and AFL_NO_FORKSRV are mutually exclusive");
 
-  if (getenv("AFL_PRELOAD")) {
-    setenv("LD_PRELOAD", getenv("AFL_PRELOAD"), 1);
-    setenv("DYLD_INSERT_LIBRARIES", getenv("AFL_PRELOAD"), 1);
-  }
-
   if (getenv("AFL_LD_PRELOAD"))
     FATAL("Use AFL_PRELOAD instead of AFL_LD_PRELOAD");
 
@@ -8201,6 +8195,11 @@ int main(int argc, char** argv) {
   load_auto();
 
   pivot_inputs();
+
+  if (getenv("AFL_PRELOAD")) {
+    setenv("LD_PRELOAD", getenv("AFL_PRELOAD"), 1);
+    setenv("DYLD_INSERT_LIBRARIES", getenv("AFL_PRELOAD"), 1);
+  }
 
   if (extras_dir) load_extras(extras_dir);
 
