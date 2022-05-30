@@ -56,6 +56,7 @@
 #include <termios.h>
 #include <dlfcn.h>
 #include <sched.h>
+#include <assert.h>
 
 #include <sys/wait.h>
 #include <sys/time.h>
@@ -368,8 +369,8 @@ enum queue_type {
 };
 
 struct exp3_state {
-  u32 t, nbArms;
-  float gamma;
+  u32 t, nbArms, T;
+  float gamma, alpha, CONSTANT_e;
   float weights[TOTAL_QUEUE];
   float rewards[TOTAL_QUEUE];
   float trusts[TOTAL_QUEUE];
@@ -453,6 +454,7 @@ static void EXP3_init(struct exp3_state* s, float gamma) {
 
   s->t = 0;
   s->nbArms = TOTAL_QUEUE;
+  s->gamma = gamma;
 
   for (i = 0; i < s->nbArms; i++) {
 
@@ -568,6 +570,61 @@ static s32 EXP3_choice(struct exp3_state* s) {
   } else {
     EXP3_trusts(s);
     return EXP3_weighted_random(s->trusts, s->nbArms);
+  }
+
+}
+
+// https://github.com/SMPyBandits/SMPyBandits/blob/master/SMPyBandits/Policies/Exp3S.py#L38
+static void EXP3S_init(struct exp3_state* s, u32 nbArms, u32 T) {
+  
+  int i;
+
+  s->T = T;
+  s->t = 0;
+  s->nbArms = nbArms;
+  s->gamma = MIN(1.0f, sqrt(s->nbArms * log(s->nbArms * T) / T));
+  assert(s->gamma >= 0.f && s->gamma <= 1.f);
+  s->alpha = 1.0f / T;
+  s->CONSTANT_e = exp(1.0);
+
+  for (i = 0; i < s->nbArms; i++) {
+
+    s->weights[i] = 1.f / s->nbArms;
+    s->rewards[i] = 0;
+    s->trusts[i] = 1.f / s->nbArms;
+
+  }
+
+}
+
+// https://github.com/SMPyBandits/SMPyBandits/blob/master/SMPyBandits/Policies/Exp3S.py#L122
+static void EXP3S_get_reward(struct exp3_state* s, float reward, u32 arm) {
+
+  int i;
+  float* old_weights;
+  float weights_sum;
+
+  assert(arm >= 0 && arm <= s->nbArms);
+
+  s->t++;
+  s->rewards[arm] += reward;
+
+  EXP3_trusts(s);
+  reward /= s->trusts[arm];
+  old_weights = ck_alloc_nozero(sizeof(float) * s->nbArms);
+
+  for (i = 0; i < s->nbArms; i++) old_weights[i] = s->weights[i];
+
+  weights_sum = EXP3_sum(old_weights, s->nbArms);
+
+  for (i = 0; i < s->nbArms; i++) {
+
+    if (i != arm) {
+      s->weights[i] = old_weights[i] + s->CONSTANT_e * (s->alpha / s->nbArms) * weights_sum;
+    }
+
+    s->weights[arm] = old_weights[arm] * exp(reward * (s->gamma / s->nbArms)) + s->CONSTANT_e * (s->alpha / s->nbArms) * weights_sum;
+
   }
 
 }
