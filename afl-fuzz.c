@@ -8297,9 +8297,9 @@ int main(int argc, char** argv) {
     if (stop_soon) goto stop_fuzzing;
   }
 
-  struct exp3_state* s = ck_alloc(sizeof(struct exp3_state));
+  struct exp3_state *state = ck_alloc(sizeof(struct exp3_state));
 
-  EXP3_init(s, 0.75f);
+  EXP3_init(state, 0.75f);
 
   while (1) {
 
@@ -8380,11 +8380,11 @@ int main(int argc, char** argv) {
 
     }
 
-    s32 id = EXP3_choice(s);
+    s32 id = EXP3_choice(state);
 
     ACTF("Choosing queue: %s", queue_name[id]);
 
-    skipped_fuzz = fuzz_one(use_argv, id, s);
+    skipped_fuzz = fuzz_one(use_argv, id, state);
 
     // if (!stop_soon && sync_id && !skipped_fuzz) {
       
@@ -8441,7 +8441,7 @@ stop_fuzzing:
   destroy_extras();
   ck_free(target_path);
   ck_free(sync_id);
-  ck_free(s);
+  ck_free(state);
 
   alloc_report();
 
