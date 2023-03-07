@@ -115,7 +115,7 @@ EXP_ST u32 cpu_to_bind = 0;           /* id of free CPU core to bind      */
 static u32 stats_update_freq = 1;     /* Stats update frequency (execs)   */
 
 EXP_ST u8  skip_deterministic,        /* Skip deterministic stages?       */
-          //  force_deterministic,       /* Force deterministic stages?      */
+           force_deterministic,       /* Force deterministic stages?      */
           //  use_splicing,              /* Recombine input files?           */
            dumb_mode,                 /* Run in non-instrumented mode?    */
           //  score_changed,             /* Scoring for favorites changed?   */
@@ -166,23 +166,6 @@ static volatile u8 stop_soon,         /* Ctrl-C pressed?                  */
                    clear_screen = 1,  /* Window resized?                  */
                    child_timed_out;   /* Traced process timed out?        */
 
-// EXP_ST u32 queued_paths,              /* Total number of queued testcases */
-//            queued_variable,           /* Testcases with variable behavior */
-//            queued_at_start,           /* Total number of initial inputs   */
-//            queued_discovered,         /* Items discovered during this run */
-//            queued_imported,           /* Items imported via -S            */
-//            queued_favored,            /* Paths deemed favorable           */
-//            queued_with_cov,           /* Paths with new coverage bytes    */
-//            pending_not_fuzzed,        /* Queued but not done yet          */
-//            pending_favored,           /* Pending favored paths            */
-//            cur_skipped_paths,         /* Abandoned inputs in cur cycle    */
-//            cur_depth,                 /* Current path depth               */
-//            max_depth,                 /* Max path depth                   */
-//            useless_at_start,          /* Number of useless starting paths */
-//            var_byte_count,            /* Bitmap bytes with var behavior   */
-//            current_entry,             /* Current queue entry ID           */
-//            havoc_div = 1;             /* Cycle count divisor for havoc    */
-
 EXP_ST u64 total_crashes,             /* Total number of crashes          */
           //  unique_crashes,            /* Crashes with unique signatures   */
            total_tmouts,              /* Total number of timeouts         */
@@ -205,29 +188,9 @@ EXP_ST u64 total_crashes,             /* Total number of crashes          */
 
 static u32 subseq_tmouts;             /* Number of timeouts in a row      */
 
-// static u8 *stage_name = "init",       /* Name of the current fuzz stage   */
-//           *stage_short,               /* Short stage name                 */
-//           *syncing_party;             /* Currently syncing with...        */
-
-// static s32 stage_cur, stage_max;      /* Stage progression                */
-// static s32 splicing_with = -1;        /* Splicing with which test case?   */
-
-// static u32 master_id, master_max;     /* Master instance job splitting    */
-
-// static u32 syncing_case;              /* Syncing with case #...           */
-
-// static s32 stage_cur_byte,            /* Byte offset of current stage op  */
-//            stage_cur_val;             /* Value used for stage op          */
-
-// static u8  stage_val_type;            /* Value type (STAGE_VAL_*)         */
-
-// static u64 stage_finds[32],           /* Patterns found per fuzz stage    */
-//            stage_cycles[32];          /* Execs per fuzz stage             */
+static u32 master_id, master_max;     /* Master instance job splitting    */
 
 static u32 rand_cnt;                  /* Random number counter            */
-
-// static u64 total_cal_us,              /* Total calibration time (us)      */
-//            total_cal_cycles;          /* Total calibration cycles         */
 
 static u64 total_bitmap_size,         /* Total bit count for all bitmaps  */
            total_bitmap_entries;      /* Number of bitmaps counted        */
@@ -271,14 +234,6 @@ struct queue_entry {
 
 };
 
-// static struct queue_entry *queue,     /* Fuzzing queue (linked list)      */
-//                           *queue_cur, /* Current offset within the queue  */
-//                           *queue_top, /* Top of the list                  */
-//                           *q_prev100; /* Previous 100 marker              */
-
-// static struct queue_entry*
-//   top_rated[MAP_SIZE];                /* Top entries for bitmap bytes     */
-
 struct extra_data {
   u8* data;                           /* Dictionary token data            */
   u32 len;                            /* Dictionary token length          */
@@ -294,8 +249,7 @@ static u32 a_extras_cnt;              /* Total number of tokens available */
 static u8* (*post_handler)(u8* buf, u32* len);
 
 struct object {
-        u8  force_deterministic,       /* Force deterministic stages?      */
-            use_splicing,              /* Recombine input files?           */
+        u8  use_splicing,              /* Recombine input files?           */
             score_changed;             /* Scoring for favorites changed?   */
 
         u32 queued_paths,              /* Total number of queued testcases */
@@ -326,8 +280,6 @@ struct object {
         s32 stage_cur, stage_max;      /* Stage progression                */
         s32 splicing_with;        /* Splicing with which test case?   */
 
-        u32 master_id, master_max;     /* Master instance job splitting    */
-
         u32 syncing_case;              /* Syncing with case #...           */
 
         s32 stage_cur_byte,            /* Byte offset of current stage op  */
@@ -350,10 +302,6 @@ struct object {
         struct queue_entry*
              top_rated[MAP_SIZE];      /* Top entries for bitmap bytes     */
 };
-
-// static u32 splice_cycle;
-// static u8  doing_det;
-// static u64 havoc_queued;
 
 struct mutator {
   u8 *in_buf, *out_buf, *orig_in, *ex_tmp, doing_det;
@@ -6240,25 +6188,25 @@ static u8 fuzz_one(char** argv, s32 id, struct exp3_state* s) {
    *********************/
   mtt[CONFIG_QUEUE].orig_perf = mtt[CONFIG_QUEUE].perf_score = calculate_score(objs[CONFIG_QUEUE].queue_cur, CONFIG_QUEUE, objs[INPUT_QUEUE].queue_cur, INPUT_QUEUE);
   mtt[INPUT_QUEUE].orig_perf = mtt[INPUT_QUEUE].perf_score = calculate_score(objs[INPUT_QUEUE].queue_cur, INPUT_QUEUE, objs[CONFIG_QUEUE].queue_cur, CONFIG_QUEUE);
-  //2022 5 20 ����
+
   // mtt[CONFIG_QUEUE].orig_perf = mtt[CONFIG_QUEUE].perf_score = calculate_score(objs[CONFIG_QUEUE].queue_cur, CONFIG_QUEUE);
- // mtt[INPUT_QUEUE].orig_perf = mtt[INPUT_QUEUE].perf_score = calculate_score(objs[INPUT_QUEUE].queue_cur, INPUT_QUEUE);
+  // mtt[INPUT_QUEUE].orig_perf = mtt[INPUT_QUEUE].perf_score = calculate_score(objs[INPUT_QUEUE].queue_cur, INPUT_QUEUE);
 
   /* Skip right away if -d is given, if we have done deterministic fuzzing on
      this entry ourselves (was_fuzzed), or if it has gone through deterministic
      testing in earlier, resumed runs (passed_det). */
 
-  // if (skip_deterministic || objs[CONFIG_QUEUE].queue_cur->was_fuzzed || objs[CONFIG_QUEUE].queue_cur->passed_det
-  //     || objs[INPUT_QUEUE].queue_cur->was_fuzzed || objs[INPUT_QUEUE].queue_cur->passed_det)
-  //   goto havoc_stage;
+  if (skip_deterministic || objs[CONFIG_QUEUE].queue_cur->was_fuzzed || objs[CONFIG_QUEUE].queue_cur->passed_det
+      || objs[INPUT_QUEUE].queue_cur->was_fuzzed || objs[INPUT_QUEUE].queue_cur->passed_det)
+    goto havoc_stage;
 
   /* Skip deterministic fuzzing if exec path checksum puts this out of scope
      for this master instance. */
 
-  // if (master_max && (queue_cur->exec_cksum % master_max) != master_id - 1)
-  //   goto havoc_stage;
+  if (master_max && (objs[CONFIG_QUEUE].queue_cur->exec_cksum % master_max) != master_id - 1)
+    goto havoc_stage;
 
-  // doing_det = 1;
+  mtt[CONFIG_QUEUE].doing_det = 1;
 
   /****************
    * RANDOM HAVOC *
@@ -6856,140 +6804,145 @@ abandon_entry:
 
 /* Grab interesting test cases from other fuzzers. */
 
-// static void sync_fuzzers(char** argv) {
+static void sync_fuzzers_queue(char** argv, enum queue_type q) {
 
-//   DIR* sd;
-//   struct dirent* sd_ent;
-//   u32 sync_cnt = 0;
+  DIR* sd;
+  struct dirent* sd_ent;
+  u32 sync_cnt = 0;
 
-//   sd = opendir(sync_dir);
-//   if (!sd) PFATAL("Unable to open '%s'", sync_dir);
+  sd = opendir(sync_dir);
+  if (!sd) PFATAL("Unable to open '%s'", sync_dir);
 
-//   stage_max = stage_cur = 0;
-//   cur_depth = 0;
+  objs[q].stage_max = objs[q].stage_cur = 0;
+  objs[q].cur_depth = 0;
 
-//   /* Look at the entries created for every other fuzzer in the sync directory. */
+  /* Look at the entries created for every other fuzzer in the sync directory. */
 
-//   while ((sd_ent = readdir(sd))) {
+  while ((sd_ent = readdir(sd))) {
 
-//     static u8 stage_tmp[128];
+    static u8 stage_tmp[128];
 
-//     DIR* qd;
-//     struct dirent* qd_ent;
-//     u8 *qd_path, *qd_synced_path;
-//     u32 min_accept = 0, next_min_accept;
+    DIR* qd;
+    struct dirent* qd_ent;
+    u8 *qd_path, *qd_synced_path;
+    u32 min_accept = 0, next_min_accept;
 
-//     s32 id_fd;
+    s32 id_fd;
 
-//     /* Skip dot files and our own output directory. */
+    /* Skip dot files and our own output directory. */
 
-//     if (sd_ent->d_name[0] == '.' || !strcmp(sync_id, sd_ent->d_name)) continue;
+    if (sd_ent->d_name[0] == '.' || !strcmp(sync_id, sd_ent->d_name)) continue;
 
-//     /* Skip anything that doesn't have a queue/ subdirectory. */
+    /* Skip anything that doesn't have a queue/ subdirectory. */
 
-//     qd_path = alloc_printf("%s/%s/queue", sync_dir, sd_ent->d_name);
+    qd_path = alloc_printf("%s/%s/%s_queue", sync_dir, sd_ent->d_name, q == CONFIG_QUEUE ? "config" : "input");
 
-//     if (!(qd = opendir(qd_path))) {
-//       ck_free(qd_path);
-//       continue;
-//     }
+    if (!(qd = opendir(qd_path))) {
+      ck_free(qd_path);
+      continue;
+    }
 
-//     /* Retrieve the ID of the last seen test case. */
+    /* Retrieve the ID of the last seen test case. */
 
-//     qd_synced_path = alloc_printf("%s/.synced/%s", out_dir, sd_ent->d_name);
+    qd_synced_path = alloc_printf("%s/.synced/%s", out_dir, sd_ent->d_name);
 
-//     id_fd = open(qd_synced_path, O_RDWR | O_CREAT, 0600);
+    id_fd = open(qd_synced_path, O_RDWR | O_CREAT, 0600);
 
-//     if (id_fd < 0) PFATAL("Unable to create '%s'", qd_synced_path);
+    if (id_fd < 0) PFATAL("Unable to create '%s'", qd_synced_path);
 
-//     if (read(id_fd, &min_accept, sizeof(u32)) > 0) 
-//       lseek(id_fd, 0, SEEK_SET);
+    if (read(id_fd, &min_accept, sizeof(u32)) > 0) 
+      lseek(id_fd, 0, SEEK_SET);
 
-//     next_min_accept = min_accept;
+    next_min_accept = min_accept;
 
-//     /* Show stats */    
+    /* Show stats */    
 
-//     sprintf(stage_tmp, "sync %u", ++sync_cnt);
-//     stage_name = stage_tmp;
-//     stage_cur  = 0;
-//     stage_max  = 0;
+    sprintf(stage_tmp, "sync %u", ++sync_cnt);
+    objs[q].stage_name = stage_tmp;
+    objs[q].stage_cur  = 0;
+    objs[q].stage_max  = 0;
 
-//     /* For every file queued by this fuzzer, parse ID and see if we have looked at
-//        it before; exec a test case if not. */
+    /* For every file queued by this fuzzer, parse ID and see if we have looked at
+       it before; exec a test case if not. */
 
-//     while ((qd_ent = readdir(qd))) {
+    while ((qd_ent = readdir(qd))) {
 
-//       u8* path;
-//       s32 fd;
-//       struct stat st;
+      u8* path;
+      s32 fd;
+      struct stat st;
 
-//       if (qd_ent->d_name[0] == '.' ||
-//           sscanf(qd_ent->d_name, CASE_PREFIX "%06u", &syncing_case) != 1 || 
-//           syncing_case < min_accept) continue;
+      if (qd_ent->d_name[0] == '.' ||
+          sscanf(qd_ent->d_name, CASE_PREFIX "%06u", &objs[q].syncing_case) != 1 || 
+          objs[q].syncing_case < min_accept) continue;
 
-//       /* OK, sounds like a new one. Let's give it a try. */
+      /* OK, sounds like a new one. Let's give it a try. */
 
-//       if (syncing_case >= next_min_accept)
-//         next_min_accept = syncing_case + 1;
+      if (objs[q].syncing_case >= next_min_accept)
+        next_min_accept = objs[q].syncing_case + 1;
 
-//       path = alloc_printf("%s/%s", qd_path, qd_ent->d_name);
+      path = alloc_printf("%s/%s", qd_path, qd_ent->d_name);
 
-//       /* Allow this to fail in case the other fuzzer is resuming or so... */
+      /* Allow this to fail in case the other fuzzer is resuming or so... */
 
-//       fd = open(path, O_RDONLY);
+      fd = open(path, O_RDONLY);
 
-//       if (fd < 0) {
-//          ck_free(path);
-//          continue;
-//       }
+      if (fd < 0) {
+         ck_free(path);
+         continue;
+      }
 
-//       if (fstat(fd, &st)) PFATAL("fstat() failed");
+      if (fstat(fd, &st)) PFATAL("fstat() failed");
 
-//       /* Ignore zero-sized or oversized files. */
+      /* Ignore zero-sized or oversized files. */
 
-//       if (st.st_size && st.st_size <= MAX_FILE) {
+      if (st.st_size && st.st_size <= MAX_FILE) {
 
-//         u8  fault;
-//         u8* mem = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        u8  fault;
+        u8* mem = mmap(0, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 
-//         if (mem == MAP_FAILED) PFATAL("Unable to mmap '%s'", path);
+        if (mem == MAP_FAILED) PFATAL("Unable to mmap '%s'", path);
 
-//         /* See what happens. We rely on save_if_interesting() to catch major
-//            errors and save the test case. */
+        /* See what happens. We rely on save_if_interesting() to catch major
+           errors and save the test case. */
 
-//         write_to_testcase(mem, st.st_size);
+        write_to_testcase(mem, st.st_size, q);
 
-//         fault = run_target(argv, exec_tmout);
+        fault = run_target(argv, exec_tmout);
 
-//         if (stop_soon) return;
+        if (stop_soon) return;
 
-//         syncing_party = sd_ent->d_name;
-//         queued_imported += save_if_interesting(argv, mem, st.st_size, fault);
-//         syncing_party = 0;
+        objs[q].syncing_party = sd_ent->d_name;
+        // objs[q].queued_imported += save_if_interesting(argv, mem, st.st_size, fault);
+        objs[q].syncing_party = 0;
 
-//         munmap(mem, st.st_size);
+        munmap(mem, st.st_size);
 
-//         if (!(stage_cur++ % stats_update_freq)) show_stats();
+        if (!(objs[q].stage_cur++ % stats_update_freq)) show_stats();
 
-//       }
+      }
 
-//       ck_free(path);
-//       close(fd);
+      ck_free(path);
+      close(fd);
 
-//     }
+    }
 
-//     ck_write(id_fd, &next_min_accept, sizeof(u32), qd_synced_path);
+    ck_write(id_fd, &next_min_accept, sizeof(u32), qd_synced_path);
 
-//     close(id_fd);
-//     closedir(qd);
-//     ck_free(qd_path);
-//     ck_free(qd_synced_path);
+    close(id_fd);
+    closedir(qd);
+    ck_free(qd_path);
+    ck_free(qd_synced_path);
     
-//   }  
+  }  
 
-//   closedir(sd);
+  closedir(sd);
 
-// }
+}
+
+static void sync_fuzzers(char** argv) {
+  sync_fuzzers_queue(argv, CONFIG_QUEUE);
+  sync_fuzzers_queue(argv, INPUT_QUEUE);
+}
 
 
 /* Handle stop signal (Ctrl-C, etc). */
@@ -7707,44 +7660,43 @@ static void get_core_count(void) {
 
 /* Validate and fix up out_dir and sync_dir when using -S. */
 
-// static void fix_up_sync(void) {
+static void fix_up_sync(void) {
 
-//   u8* x = sync_id;
+  u8* x = sync_id;
 
-//   if (dumb_mode)
-//     FATAL("-S / -M and -n are mutually exclusive");
+  if (dumb_mode)
+    FATAL("-S / -M and -n are mutually exclusive");
 
-//   if (skip_deterministic) {
+  if (skip_deterministic) {
 
-//     if (force_deterministic)
-//       FATAL("use -S instead of -M -d");
-//     else
-//       FATAL("-S already implies -d");
+    if (force_deterministic)
+      FATAL("use -S instead of -M -d");
+    else
+      FATAL("-S already implies -d");
 
-//   }
+  }
 
-//   while (*x) {
+  while (*x) {
 
-//     if (!isalnum(*x) && *x != '_' && *x != '-')
-//       FATAL("Non-alphanumeric fuzzer ID specified via -S or -M");
+    if (!isalnum(*x) && *x != '_' && *x != '-')
+      FATAL("Non-alphanumeric fuzzer ID specified via -S or -M");
 
-//     x++;
+    x++;
 
-//   }
+  }
 
-//   if (strlen(sync_id) > 32) FATAL("Fuzzer ID too long");
+  if (strlen(sync_id) > 32) FATAL("Fuzzer ID too long");
 
-//   x = alloc_printf("%s/%s", out_dir, sync_id);
+  x = alloc_printf("%s/%s", out_dir, sync_id);
 
-//   sync_dir = out_dir;
-//   out_dir  = x;
+  sync_dir = out_dir;
+  out_dir  = x;
 
-//   if (!force_deterministic) {
-//     skip_deterministic = 1;
-//     use_splicing = 1;
-//   }
+  if (!force_deterministic) {
+    skip_deterministic = 1;
+  }
 
-// }
+}
 
 
 /* Handle screen resize (SIGWINCH). */
@@ -8021,34 +7973,34 @@ int main(int argc, char** argv) {
         out_dir = optarg;
         break;
 
-      // case 'M': { /* master sync ID */
+      case 'M': { /* master sync ID */
 
-      //     u8* c;
+          u8* c;
 
-      //     if (sync_id) FATAL("Multiple -S or -M options not supported");
-      //     sync_id = ck_strdup(optarg);
+          if (sync_id) FATAL("Multiple -S or -M options not supported");
+          sync_id = ck_strdup(optarg);
 
-      //     if ((c = strchr(sync_id, ':'))) {
+          if ((c = strchr(sync_id, ':'))) {
 
-      //       *c = 0;
+            *c = 0;
 
-      //       if (sscanf(c + 1, "%u/%u", &master_id, &master_max) != 2 ||
-      //           !master_id || !master_max || master_id > master_max ||
-      //           master_max > 1000000) FATAL("Bogus master ID passed to -M");
+            if (sscanf(c + 1, "%u/%u", &master_id, &master_max) != 2 ||
+                !master_id || !master_max || master_id > master_max ||
+                master_max > 1000000) FATAL("Bogus master ID passed to -M");
 
-      //     }
+          }
 
-      //     force_deterministic = 1;
+          force_deterministic = 1;
 
-      //   }
+        }
 
-      //   break;
+        break;
 
-      // case 'S': 
+      case 'S': 
 
-      //   if (sync_id) FATAL("Multiple -S or -M options not supported");
-      //   sync_id = ck_strdup(optarg);
-      //   break;
+        if (sync_id) FATAL("Multiple -S or -M options not supported");
+        sync_id = ck_strdup(optarg);
+        break;
 
       case 'f': /* target file */
 
@@ -8199,7 +8151,7 @@ int main(int argc, char** argv) {
   setup_signal_handlers();
   check_asan_opts();
 
-  // if (sync_id) fix_up_sync();
+  if (sync_id) fix_up_sync();
 
   if (!strcmp(in_dir, out_dir))
     FATAL("Input and output directories can't be the same");
@@ -8339,8 +8291,8 @@ int main(int argc, char** argv) {
 
       prev_queued = objs[CONFIG_QUEUE].queued_paths;
 
-      // if (objs[CONFIG_QUEUE].sync_id && objs[CONFIG_QUEUE].queue_cycle == 1 && getenv("AFL_IMPORT_FIRST"))
-      //   sync_fuzzers(use_argv);
+      if (sync_id && objs[CONFIG_QUEUE].queue_cycle == 1 && getenv("AFL_IMPORT_FIRST"))
+        sync_fuzzers(use_argv);
 
     }
 
@@ -8386,12 +8338,12 @@ int main(int argc, char** argv) {
 
     skipped_fuzz = fuzz_one(use_argv, id, state);
 
-    // if (!stop_soon && sync_id && !skipped_fuzz) {
+    if (!stop_soon && sync_id && !skipped_fuzz) {
       
-    //   if (!(sync_interval_cnt++ % SYNC_INTERVAL))
-    //     sync_fuzzers(use_argv);
+      if (!(sync_interval_cnt++ % SYNC_INTERVAL))
+        sync_fuzzers(use_argv);
 
-    // }
+    }
 
     if (!stop_soon && exit_1) stop_soon = 2;
 
