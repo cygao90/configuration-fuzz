@@ -167,7 +167,7 @@ static volatile u8 stop_soon,         /* Ctrl-C pressed?                  */
                    child_timed_out;   /* Traced process timed out?        */
 
 EXP_ST u64 total_crashes,             /* Total number of crashes          */
-          //  unique_crashes,            /* Crashes with unique signatures   */
+           unique_crashes,            /* Crashes with unique signatures   */
            total_tmouts,              /* Total number of timeouts         */
            unique_tmouts,             /* Timeouts with unique signatures  */
            unique_hangs,              /* Hangs with unique signatures     */
@@ -2805,11 +2805,12 @@ static void write_to_testcase(void* mem, u32 len, enum queue_type type) {
 
   if (out_file) {
 
-    unlink(out_file); /* Ignore errors. */
+    // unlink(out_file); /* Ignore errors. */
 
-    fd = open(out_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    // fd = open(out_file, O_WRONLY | O_CREAT | O_EXCL, 0600);
 
-    if (fd < 0) PFATAL("Unable to create '%s'", out_file);
+    // if (fd < 0) PFATAL("Unable to create '%s'", out_file);
+    PFATAL("Not implemented");
 
   } else lseek(fd, 0, SEEK_SET);
 
@@ -2827,9 +2828,16 @@ static void write_to_testcase(void* mem, u32 len, enum queue_type type) {
 
 /* The same, but with an adjustable gap. Used for trimming. */
 
-static void write_with_gap(void* mem, u32 len, u32 skip_at, u32 skip_len) {
+static void write_with_gap(void* mem, u32 len, u32 skip_at, u32 skip_len, enum queue_type type) {
 
-  s32 fd = out_fd_input;
+  s32 fd;
+  if (type == INPUT_QUEUE) {
+    fd = out_fd_input;
+  } else if (type == CONFIG_QUEUE) {
+    fd = out_fd_config;
+  } else {
+    PFATAL("Unknown type...");
+  }
   u32 tail_len = len - skip_at - skip_len;
 
   if (out_file) {
@@ -3459,7 +3467,7 @@ static void write_crash_readme(void) {
 
 static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault, enum queue_type q) {
 
-  u8  *fn = "";
+  u8  *fn = "", *input_fn = "", *config_fn = "";
   u8  hnb;
   s32 fd;
   u8  keeping = 0, res;
@@ -3604,8 +3612,10 @@ keep_as_crash:
 
 #ifndef SIMPLE_FILES
 
-      fn = alloc_printf("%s/crashes/id:%06llu,sig:%02u,%s", out_dir,
-                        objs[q].unique_crashes, kill_signal, describe_op(0, q));
+      config_fn = alloc_printf("%s/crashes/id:%06llu,sig:%02u,%s,%s", out_dir,
+                        objs[CONFIG_QUEUE].unique_crashes, kill_signal, describe_op(0, CONFIG_QUEUE), queue_name[CONFIG_QUEUE]);
+      input_fn = alloc_printf("%s/crashes/id:%06llu,sig:%02u,%s,%s", out_dir,
+                        objs[INPUT_QUEUE].unique_crashes, kill_signal, describe_op(0, INPUT_QUEUE), queue_name[INPUT_QUEUE]);
 
 #else
 
@@ -3614,7 +3624,8 @@ keep_as_crash:
 
 #endif /* ^!SIMPLE_FILES */
 
-      objs[q].unique_crashes++;
+      unique_crashes++;
+      objs[INPUT_QUEUE].unique_crashes = objs[CONFIG_QUEUE].unique_crashes = unique_crashes;
 
       last_crash_time = get_cur_time();
       last_crash_execs = total_execs;
@@ -3629,14 +3640,56 @@ keep_as_crash:
 
   /* If we're here, we apparently want to save the crash or hang
      test case, too. */
+  if (strlen(fn) > 0) {
+    fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (fd < 0) PFATAL("Unable to create '%s'", fn);
+    ck_write(fd, mem, len, fn);
+    close(fd);
 
-  fd = open(fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
-  if (fd < 0) PFATAL("Unable to create '%s'", fn);
-  ck_write(fd, mem, len, fn);
-  close(fd);
+    ck_free(fn);
+  }
 
-  ck_free(fn);
+  struct stat statbuf;
 
+  if (strlen(config_fn) > 0) {
+    fd = open(config_fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (fd < 0) PFATAL("Unable to create '%s'", config_fn);
+
+    u8* fn_config = alloc_printf("%s/.cur_config", out_dir);
+    stat(fn_config, &statbuf);
+    s64 sz = statbuf.st_size;
+    u8 *buf = ck_alloc_nozero(sz);
+    s32 config = open(fn_config, O_RDONLY, 0600);
+    ck_read(config, buf, sz, fn_config);
+
+    ck_write(fd, buf, sz, config_fn);
+    close(fd);
+    close(config);
+
+    ck_free(fn_config);
+    ck_free(config_fn);
+    ck_free(buf);
+  }
+
+  if (strlen(input_fn) > 0) {
+    fd = open(input_fn, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (fd < 0) PFATAL("Unable to create '%s'", input_fn);
+
+    u8* fn_input = alloc_printf("%s/.cur_input", out_dir);
+    stat(fn_input, &statbuf);
+    s64 sz = statbuf.st_size;
+    u8 *buf = ck_alloc_nozero(sz);
+    s32 input = open(fn_input, O_RDONLY, 0600);
+    ck_read(input, buf, sz, fn_input);
+
+    ck_write(fd, buf, sz, input_fn);
+    close(fd);
+    close(input);
+
+    ck_free(fn_input);
+    ck_free(input_fn);
+    ck_free(buf);
+  }
   return keeping;
 
 }
@@ -4873,7 +4926,7 @@ static u8 trim_case(char** argv, struct queue_entry* q, u8* in_buf, u32 oid) {
       u32 trim_avail = MIN(remove_len, q->len - remove_pos);
       u32 cksum;
 
-      write_with_gap(in_buf, q->len, remove_pos, trim_avail);
+      write_with_gap(in_buf, q->len, remove_pos, trim_avail, oid);
 
       fault = run_target(argv, exec_tmout);
       trim_execs++;
@@ -5014,12 +5067,12 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len, enum queue_type o
 
   u8 fault;
 
-  if (post_handler) {
+  // if (post_handler) {
 
-    out_buf = post_handler(out_buf, &len);
-    if (!out_buf || !len) return 0;
+  //   out_buf = post_handler(out_buf, &len);
+  //   if (!out_buf || !len) return 0;
 
-  }
+  // }
 
   write_to_testcase(out_buf, len, oid);
 
