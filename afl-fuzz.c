@@ -1752,6 +1752,15 @@ static void read_testcases(void) {
     }
 
     ACTF("Reading '%s'", nl[i]->d_name);
+    
+    if (strcmp(nl[i]->d_name, "input_queue") == 0) {
+      obj_num = INPUT_QUEUE;
+    } else if (strcmp(nl[i]->d_name, "config_queue") == 0) {
+      obj_num = CONFIG_QUEUE;
+    } else {
+      ck_free(fn);
+      continue;
+    }
 
     if (S_ISDIR(st.st_mode)) {
 
@@ -1790,7 +1799,7 @@ static void read_testcases(void) {
         // if (!access(dfn, F_OK)) passed_det = 1;
         // ck_free(dfn);
         ACTF("queue: name: '%s', size: '%u'", sub_fn, st.st_size);
-        add_to_queue(sub_fn, sub_st.st_size, 0, obj_num++);
+        add_to_queue(sub_fn, sub_st.st_size, 0, obj_num);
       }
       free(sub_nl);
     }
