@@ -18,20 +18,25 @@ def parse_grammar(filename: str) -> Grammar:
     with open(filename) as f:
         data = json.load(f)
     gram: Grammar = {}
+
     if data["bnf"]:
         gram = data
         del gram["bnf"]
     else:
         for k, v in BUILTIN_TYPES.items():
             gram[k] = v
+
         if "types" in data.keys():
             types = data["types"]
             for k, v in types.items():
                 gram[k] = v
+
         opt_list = []
+
         for k, v in data["options"].items():
             opt_list.append(f"{k} {' '.join(v)}\n")
         gram["<start>"] = opt_list
+
     print(gram)
     return gram
 
@@ -49,7 +54,6 @@ def gen_config(grammar: Grammar) -> str:
     return config
 
 
-
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("missing config defenition file")
@@ -63,4 +67,3 @@ if __name__ == "__main__":
             f.write(config)
             print("===============================")
             print(config)
-            print("===============================")
