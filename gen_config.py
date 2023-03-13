@@ -6,6 +6,13 @@ import sys
 
 import json
 
+BUILTIN_TYPES = {
+    "<digit0>": crange("0", "9"),
+    "<digit>": crange("1", "9"),
+    "<integer>": ["0", "<digit><digit0>+"],
+    "<bool>": ["true", "false"]
+}
+
 def parse_grammar(filename: str) -> Grammar:
     data= {}
     with open(filename) as f:
@@ -15,15 +22,17 @@ def parse_grammar(filename: str) -> Grammar:
         gram = data
         del gram["bnf"]
     else:
-        type_set = data["values"]
-        gram["<start>"] = []
-        for k, v in data["values"].items():
+        for k, v in BUILTIN_TYPES.items():
             gram[k] = v
-        for k, v in data["opts"].items():
-            if k in type_set:
-                for item in v:
-                    gram["<start>"].append(f"{item} {k}\n") 
-        print(gram)
+        if "types" in data.keys():
+            types = data["types"]
+            for k, v in types.items():
+                gram[k] = v
+        opt_list = []
+        for k, v in data["options"].items():
+            opt_list.append(f"{k} {' '.join(v)}\n")
+        gram["<start>"] = opt_list
+    print(gram)
     return gram
 
 def gen_config(grammar: Grammar) -> str:
@@ -42,6 +51,9 @@ def gen_config(grammar: Grammar) -> str:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("missing config defenition file")
+        exit(0)
     json_path = sys.argv[1]
     grammar = parse_grammar(json_path)
 
