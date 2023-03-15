@@ -4527,13 +4527,13 @@ static void show_stats(void) {
      put them in a temporary buffer first. */
 
   sprintf(tmp, "%s%s (%0.02f%%)", DI(objs[INPUT_QUEUE].current_entry),
-          objs[INPUT_QUEUE].queue_cur->favored ? "" : "*",
+          objs[INPUT_QUEUE].queue_cur ? (objs[INPUT_QUEUE].queue_cur->favored ? "" : "*") : "", // sometimes queue_cur will be null, dont know how to fix
           ((double)objs[INPUT_QUEUE].current_entry * 100) / objs[INPUT_QUEUE].queued_paths);
 
   SAYF(bV bSTOP "  now processing : " cRST "%-17s " bSTG bV bSTOP, tmp);
 
-  sprintf(tmp, "%0.02f%% / %0.02f%%", ((double)objs[INPUT_QUEUE].queue_cur->bitmap_size) * 
-          100 / MAP_SIZE, t_byte_ratio);
+  sprintf(tmp, "%0.02f%% / %0.02f%%", (double)(objs[INPUT_QUEUE].queue_cur ? objs[INPUT_QUEUE].queue_cur->bitmap_size : 0) * 
+         100 / MAP_SIZE, t_byte_ratio);
 
   SAYF("    map density : %s%-21s " bSTG bV "\n", t_byte_ratio > 70 ? cLRD : 
        ((t_bytes < 200 && !dumb_mode) ? cPIN : cRST), tmp);
@@ -5130,7 +5130,7 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len, enum queue_type o
 static u32 choose_block_len(u32 limit, u32 oid) {
 
   u32 min_value, max_value;
-  u32 rlim = MIN(objs[oid].queue_cycle, 3);
+  u32 rlim = MAX(MIN(objs[oid].queue_cycle, 3), 1); // sometime queue_cycle will be 0, causing floating point exception
 
   if (!run_over10m) rlim = 1;
 
@@ -9220,11 +9220,9 @@ int main(int argc, char** argv) {
 
     }
 
-    ACTF("Choosing queue: %s", queue_name[cur_queue]);
+    // ACTF("Choosing queue: %s", queue_name[cur_queue]);
 
     skipped_fuzz = fuzz_one(use_argv, cur_queue, state);
-
-    cur_queue = EXP3S_choice(state);
 
     if (!stop_soon && sync_id && !skipped_fuzz) {
       
@@ -9238,6 +9236,9 @@ int main(int argc, char** argv) {
 
     objs[cur_queue].queue_cur = objs[cur_queue].queue_cur->next;
     objs[cur_queue].current_entry++;
+
+    cur_queue = EXP3S_choice(state);
+
   }
 
   // if (objs[CONFIG_QUEUE].queue_cur) show_stats();
