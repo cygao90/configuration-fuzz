@@ -34,13 +34,15 @@
 #ifndef _HAVE_ARGV_FUZZ_INL
 #define _HAVE_ARGV_FUZZ_INL
 
+#include <ctype.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <fcntl.h>
 
 #define AFL_INIT_ARGV()          \
   do {                           \
                                  \
-    argv = afl_init_argv(&argc); \
+    argv = afl_init_argv(&argc, argv); \
                                  \
   } while (0)
 
@@ -61,6 +63,10 @@ static char **afl_init_argv(int *argc, char** argv) {
   static char  in_buf[MAX_CMDLINE_LEN];
   static char *ret[MAX_CMDLINE_PAR];
 
+  for (int i = 0; i < *argc; i++) {
+    printf("old argv[%d]: %s\n", i, argv[i]);
+  }
+
   char *ptr = in_buf;
   int   rc = 0;
 
@@ -68,19 +74,36 @@ static char **afl_init_argv(int *argc, char** argv) {
 
   if (read(fd, in_buf, MAX_CMDLINE_LEN - 2) < 0) {}
 
+  ret[rc] = argv[0];
+  ++rc;
+
   while (*ptr && rc < MAX_CMDLINE_PAR) {
 
+    while (*ptr && isspace(*ptr)) ptr++;
+    if (!(*ptr)) break;
+
     ret[rc] = ptr;
-    if (ret[rc][0] == 0x02 && !ret[rc][1]) ret[rc]++;
+
     rc++;
 
-    while (*ptr)
+    while (*ptr && !isspace(*ptr))
       ptr++;
+    *ptr = '\0';
     ptr++;
 
   }
 
+   if (*argc > 2) {
+    for (int i = 2; i < *argc; i++) {
+      ret[rc++] = argv[i];
+    }
+  }
+
   *argc = rc;
+
+  for (int i = 0; i < rc; i++) {
+    printf("argv[%d]: %s\n", i, ret[i]);
+  }
 
   return ret;
 

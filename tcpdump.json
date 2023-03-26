@@ -1,0 +1,119 @@
+{
+    "bnf": true,
+    "<start>": [
+        "-r - <tcpdump-options>+"
+    ],
+    "<tcpdump-options>": [
+        "<hostname-resolution-option> ",
+        "<quiet-option> ",
+        "<no-timestamp-option> ",
+        "<hex-ascii-option> ",
+        "<count-option> ",
+        "<ascii-option> ",
+        "<very-verbose-option> ",
+        "<timestamp-option> ",
+        "<time-format-option> ",
+        "<packet-buffer-size-option> ",
+        "<directional-option> ",
+        "<link-layer-header-option> ",
+        "<vlan-header-option> ",
+        "<rssi-header-option> "
+    ],
+    "<hostname-resolution-option>": [
+        "-n"
+    ],
+    "<quiet-option>": [
+        "-q"
+    ],
+    "<no-timestamp-option>": [
+        "-t"
+    ],
+    "<hex-ascii-option>": [
+        "-X"
+    ],
+    "<count-option>": [
+        "-c <packet-count>"
+    ],
+    "<ascii-option>": [
+        "-A"
+    ],
+    "<very-verbose-option>": [
+        "-v"
+    ],
+    "<timestamp-option>": [
+        "-T <timestamp-type>"
+    ],
+    "<time-format-option>": [
+        "-tttt <time-format>"
+    ],
+    "<packet-buffer-size-option>": [
+        "-B <buffer-size>"
+    ],
+    "<directional-option>": [
+        "-Q <directional-option-value>"
+    ],
+    "<link-layer-header-option>": [
+        "-e"
+    ],
+    "<vlan-header-option>": [
+        "vlan"
+    ],
+    "<rssi-header-option>": [
+        "rssi"
+    ],
+    "<packet-count>": [
+        "<integer>"
+    ],
+    "<timestamp-type>": [
+        "ru",
+        "host",
+        "unix",
+        "iso",
+        "ns",
+        "inet",
+        "inet6",
+        "ip",
+        "icmp",
+        "icmp6",
+        "tcp",
+        "udp",
+        "sctp",
+        "mpls",
+        "ppp",
+        "slip",
+        "raw",
+        "llc",
+        "ieee802_11",
+        "ieee802_11_radio",
+        "prism",
+        "ah",
+        "esp",
+        "pim",
+        "vrrp",
+        "carp",
+        "atalk",
+        "aarp",
+        "decnet",
+        "lat",
+        "sca",
+        "moprc",
+        "mopdl",
+        "geneve",
+        "vxlan",
+        "nvgre"
+    ],
+    "<time-format>": [
+        "%Y-%m-%d %H:%M:%S",
+        "%H:%M:%S.%f"
+    ],
+    "<buffer-size>": [
+        "<integer>"
+    ],
+    "<directional-option-value>": [
+        "in",
+        "out",
+        "inout"
+    ],
+    "<integer>": ["<digit>+"],
+    "<digit>": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+}

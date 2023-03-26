@@ -1,0 +1,11 @@
+{
+    "bnf": true,
+    "<start>": ["-i pipe:0 <options>+ pipe:1"],
+    "<options>": [
+        "-f <format> "
+    ],
+    "<format>": [
+        "avi",
+        "wav"
+    ]
+}

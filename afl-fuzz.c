@@ -3218,7 +3218,7 @@ static void perform_dry_run(char** argv, enum queue_type oid) {
 
       case FAULT_NOBITS: 
 
-        objs[oid].useless_at_start++;
+        // objs[oid].useless_at_start++;
 
         if (!in_bitmap && !shuffle_queue)
           WARNF("No new instrumentation output, test case may be useless.");
@@ -6143,15 +6143,15 @@ static u8 fuzz_one(char** argv, enum queue_type oid, struct exp3_state *s) {
 
   if (!dumb_mode && !objs[oid].queue_cur->trim_done) {
 
-    u8 res = trim_case(argv, objs[oid].queue_cur, in_buf, oid);
+    // u8 res = trim_case(argv, objs[oid].queue_cur, in_buf, oid);
 
-    if (res == FAULT_ERROR)
-      FATAL("Unable to execute target application");
+    // if (res == FAULT_ERROR)
+    //   FATAL("Unable to execute target application");
 
-    if (stop_soon) {
-      objs[oid].cur_skipped_paths++;
-      goto abandon_entry;
-    }
+    // if (stop_soon) {
+    //   objs[oid].cur_skipped_paths++;
+    //   goto abandon_entry;
+    // }
 
     /* Don't retry trimming, even if it failed. */
 
@@ -9146,8 +9146,8 @@ int main(int argc, char** argv) {
   perform_dry_run(use_argv, INPUT_QUEUE);
   perform_dry_run(use_argv, CONFIG_QUEUE);
 
-  cull_queue(INPUT_QUEUE);
-  cull_queue(CONFIG_QUEUE);
+  // cull_queue(INPUT_QUEUE);
+  // cull_queue(CONFIG_QUEUE);
 
   show_init_stats();
 

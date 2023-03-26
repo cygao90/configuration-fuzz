@@ -41,6 +41,8 @@ int __libc_start_main(int (*main)(int, char **, char **), int argc, char **argv,
 
   }
 
+  sub_argc = argc;
+
   sub_argv = afl_init_argv(&sub_argc, argv);
 
   return orig(main, sub_argc, sub_argv, init, fini, rtld_fini, stack_end);

@@ -3,14 +3,12 @@ from fuzzingbook.Grammars import START_SYMBOL, new_symbol, Grammar
 from fuzzingbook.GrammarCoverageFuzzer import GrammarCoverageFuzzer
 import os
 import sys
+import argparse
 
 import json
 
 BUILTIN_TYPES = {
-    "<digit0>": crange("0", "9"),
-    "<digit>": crange("1", "9"),
-    "<integer>": ["0", "<digit><digit0>+"],
-    "<bool>": ["true", "false"]
+    
 }
 
 def parse_grammar(filename: str) -> Grammar:
@@ -40,12 +38,12 @@ def parse_grammar(filename: str) -> Grammar:
     print(gram)
     return gram
 
-def gen_config(grammar: Grammar) -> str:
+def gen_config(grammar: Grammar, min_nonterminals: int) -> str:
     assert is_valid_grammar(grammar);
 
     ebnf= convert_ebnf_grammar(grammar)
 
-    f = GrammarCoverageFuzzer(ebnf, min_nonterminals = 1)
+    f = GrammarCoverageFuzzer(ebnf, min_nonterminals = min_nonterminals)
 
     config = ""
 
@@ -55,15 +53,19 @@ def gen_config(grammar: Grammar) -> str:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("missing config defenition file")
-        exit(0)
-    json_path = sys.argv[1]
-    grammar = parse_grammar(json_path)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("file", metavar='json file', type=str, help="path of configuration definition file")
+    parser.add_argument("--num", "-n", type=int, default=1, help="# of configuration files being generated")
+    parser.add_argument("--dest", "-d", type=str, default=None, help="destination to save configuration files")
+    parser.add_argument("--min_nonterminals", "-m", type=int, default=1, help="# of non-terminals")
+    args = parser.parse_args()
 
-    for i in range(10):
-        with open(f"config{i}.conf", "w") as f:
-            config = gen_config(grammar)
-            f.write(config)
-            print("===============================")
-            print(config)
+    grammar = parse_grammar(args.file)
+
+    for i in range(args.num):
+        config = gen_config(grammar, args.min_nonterminals)
+        if args.dest is not None:
+            with open(f"{args.dest}/config{i}.conf", "w") as f:
+                f.write(config)
+        print("===============================")
+        print(config)
