@@ -4,6 +4,8 @@ from fuzzingbook.GrammarCoverageFuzzer import GrammarCoverageFuzzer
 import os
 import sys
 import argparse
+import random
+import time
 
 import json
 
@@ -35,21 +37,36 @@ def parse_grammar(filename: str) -> Grammar:
             opt_list.append(f"{k} {' '.join(v)}\n")
         gram["<start>"] = opt_list
 
-    print(gram)
+    # print(gram)
     return gram
 
 def gen_config(grammar: Grammar, min_nonterminals: int) -> str:
+    if "min_nonterminals" in grammar.keys():
+        min_nonterminals = grammar["min_nonterminals"]
+        del grammar["min_nonterminals"]
+
     assert is_valid_grammar(grammar);
 
     ebnf= convert_ebnf_grammar(grammar)
 
     f = GrammarCoverageFuzzer(ebnf, min_nonterminals = min_nonterminals)
 
-    config = ""
+    config = f.fuzz()
 
-    for i in range(len(grammar["<start>"])):
-        config += f.fuzz() 
+    # for i in range(len(grammar["<start>"])):
+    #     config += f.fuzz()
     return config
+
+
+def generate(grammar, symbol="<start>"):
+    assert is_valid_grammar(grammar);
+
+    if symbol not in grammar:
+        return symbol
+    else:
+        expansion = random.choice(grammar[symbol])
+        tokens = expansion.split()
+        return " ".join(generate(grammar, token) for token in tokens)
 
 
 if __name__ == "__main__":
@@ -57,8 +74,10 @@ if __name__ == "__main__":
     parser.add_argument("file", metavar='json file', type=str, help="path of configuration definition file")
     parser.add_argument("--num", "-n", type=int, default=1, help="# of configuration files being generated")
     parser.add_argument("--dest", "-d", type=str, default=None, help="destination to save configuration files")
-    parser.add_argument("--min_nonterminals", "-m", type=int, default=1, help="# of non-terminals")
+    parser.add_argument("--min_nonterminals", "-m", type=int, default=10, help="# of non-terminals")
     args = parser.parse_args()
+
+    random.seed(time.time())
 
     grammar = parse_grammar(args.file)
 
@@ -67,5 +86,5 @@ if __name__ == "__main__":
         if args.dest is not None:
             with open(f"{args.dest}/config{i}.conf", "w") as f:
                 f.write(config)
-        print("===============================")
         print(config)
+    

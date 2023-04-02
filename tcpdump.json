@@ -1,7 +1,7 @@
 {
     "bnf": true,
     "<start>": [
-        "-r - <tcpdump-options>+"
+        "<tcpdump-options>+"
     ],
     "<tcpdump-options>": [
         "<hostname-resolution-option> ",

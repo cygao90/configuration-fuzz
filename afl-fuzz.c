@@ -103,7 +103,10 @@ EXP_ST u8 *in_dir,                    /* Input directory with test cases  */
           *in_bitmap,                 /* Input bitmap                     */
           *doc_path,                  /* Path to documentation dir        */
           *target_path,               /* Path to target binary            */
-          *orig_cmdline;              /* Original command line            */
+          *orig_cmdline,              /* Original command line            */
+          *config_generator,
+          *python_script,
+          *script_cmd;
 
 EXP_ST u32 exec_tmout = EXEC_TIMEOUT; /* Configurable exec timeout (ms)   */
 static u32 hang_tmout = EXEC_TIMEOUT; /* Timeout used for hang det (ms)   */
@@ -339,6 +342,8 @@ struct object objs[TOTAL_QUEUE] = {
   }
 };
 
+u32 map_id = 0;
+
 /* Interesting values, as per config.h */
 
 static s8  interesting_8[]  = { INTERESTING_8 };
@@ -410,34 +415,55 @@ static float EXP3_sum(float* arr, s32 n) {
 }
 
 
+static void EXP3_init(struct exp3_state* s, int arms, float gamma) {
+
+    int i;
+
+    s->t = 0;
+    s->nbArms = arms;
+    s->gamma = gamma;
+
+    for (i = 0; i < s->nbArms; i++) {
+
+        s->weights[i] = 1.f / s->nbArms;
+        s->rewards[i] = 0;
+        s->trusts[i] = 1.f / s->nbArms;
+
+    }
+
+}
+
 /* Update trusts */
 // https://github.com/SMPyBandits/SMPyBandits/blob/master/SMPyBandits/Policies/Exp3.py#L67
 static void EXP3_trusts(struct exp3_state* s) {
 
-  float sum;
-  int i;
+    float sum;
+    int i;
 
-  for (i = 0; i < s->nbArms; i++) {
+    for (i = 0; i < s->nbArms; i++) {
 
-    s->trusts[i] = ((1.f - s->gamma) * s->weights[i]) + (s->gamma / s->nbArms);
+        s->trusts[i] = ((1.f - s->gamma) * s->weights[i]) + (s->gamma / s->nbArms);
 
-    if (isinf(s->trusts[i])) s->trusts[i] = 0;
+        if (isinf(s->trusts[i])) s->trusts[i] = 0;
 
-  }
-
-  sum = EXP3_sum(s->trusts, s->nbArms);
-
-  if (sum <= 1e-8) {
-
-    for (int i = 0; i < s->nbArms; i++) {
-      s->trusts[i] = 1.f / s->nbArms;
     }
 
-  }
+    sum = EXP3_sum(s->trusts, s->nbArms);
 
-  for (i = 0; i < s->nbArms; i++) {
-    s->trusts[i] /= sum;
-  }
+    if (sum <= 1e-8) {
+
+        for (int i = 0; i < s->nbArms; i++) {
+            s->trusts[i] = 1.f / s->nbArms;
+        }
+
+        sum = EXP3_sum(s->trusts, s->nbArms);
+
+    }
+    assert(sum != 0);
+
+    for (i = 0; i < s->nbArms; i++) {
+        s->trusts[i] /= sum;
+    }
 
 }
 
@@ -445,140 +471,145 @@ static void EXP3_trusts(struct exp3_state* s) {
 // https://github.com/SMPyBandits/SMPyBandits/blob/master/SMPyBandits/Policies/Exp3.py#L89
 static void EXP3_get_reward(struct exp3_state* s, float reward, u32 arm) {
 
-  float sum;
-  int i;
+    float sum;
+    int i;
 
-  if (arm < 0 || arm >= s->nbArms) PFATAL("Wrong arm.");
+    if (arm < 0 || arm >= s->nbArms) PFATAL("Wrong arm.");
 
-  s->t++;
-  s->rewards[arm] += reward;
+    s->t++;
+    s->rewards[arm] += reward;
 
-  EXP3_trusts(s);
-  reward /= s->trusts[arm];
+    EXP3_trusts(s);
+    reward /= s->trusts[arm];
 
-  s->weights[arm] *= expf(reward * (s->gamma / s->nbArms));
+    float exp_para = reward * (s->gamma / s->nbArms);
+    if (exp_para > 11000) {  // For ensuring not overflow
+        exp_para = 11000;
+    }
 
-  sum = EXP3_sum(s->weights, s->nbArms);
-  
-  for (i = 0; i < s->nbArms; i++) {
+    s->weights[arm] *= expl(exp_para);
 
-    s->weights[i] /= sum;
+    if (isnan(s->weights[arm]))
+    {
+        printf("error NaN");
+    }
 
-  }
-  
+    sum = EXP3_sum(s->weights, s->nbArms);
+
+    assert(sum != 0);
+
+    if (isinf(sum))
+    {
+        printf("error inf");
+    }
+
+    for (i = 0; i < s->nbArms; i++) {
+
+        s->weights[i] /= sum;
+
+        if (isnan(s->weights[i]))
+        {
+            printf("error NaN");
+        }
+    }
+
 }
 
 
 static s32 EXP3_weighted_random(float* trusts, s32 nbArms) {
 
-  float sum, rnd;
-  int i;
+    float sum, rnd;
+    int i;
 
-  sum = EXP3_sum(trusts, nbArms);
-  rnd = (float)UR(RAND_MAX) / (float)RAND_MAX * sum;
-  for (i = 0; i < nbArms; i++) {
+    sum = EXP3_sum(trusts, nbArms);
+    rnd = (float)UR(RAND_MAX) / (float)RAND_MAX * sum;
+    for (i = 0; i < nbArms; i++) {
 
-    if (rnd < trusts[i])
-      return i;
+        if (rnd < trusts[i])
+            return i;
 
-    rnd -= trusts[i];
+        rnd -= trusts[i];
 
-  }
-  return rnd;
+    }
+
+    PFATAL("EXP3_weighted_random");
+
 }
 
-static void EXP3S_trusts(struct exp3_state *s) {
-  for (int i = 0; i < s->nbArms; i++) {
-    s->trusts[i] = ((1.0f - s->gamma) * s->weights[i] / EXP3_sum(s->weights, s->nbArms)) + (s->gamma / s->nbArms);
-  }
-
-  for (int i = 0; i < s->nbArms; i++) {
-    if (!isfinite(s->trusts[i])) {
-      s->trusts[i] = 0.f;
-    }
-  }
-
-  if (EXP3_sum(s->trusts, s->nbArms) < 1e-8) {
-    for (int i = 0; i < s->nbArms; i++) {
-      s->trusts[i] = 1.f / s->nbArms;
-    }
-  }
-
-  for (int i = 0; i < s->nbArms; i++) {
-    s->trusts[i] /= EXP3_sum(s->trusts, s->nbArms);
-  }
-}
 
 /* Choose randomly accordingly to the trusts */
 // https://github.com/SMPyBandits/SMPyBandits/blob/master/SMPyBandits/Policies/Exp3.py#L111
-static s32 EXP3S_choice(struct exp3_state* s) {
-  
-  if (s->t < s->nbArms) {
-    return s->t;
-  } else {
-    EXP3S_trusts(s);
-    return EXP3_weighted_random(s->trusts, s->nbArms);
-  }
+static s32 EXP3_choice(struct exp3_state* s) {
+
+    if (s->t < s->nbArms) {
+        return s->t;
+    }
+    else {
+        EXP3_trusts(s);
+        return EXP3_weighted_random(s->trusts, s->nbArms);
+    }
 
 }
 
 // https://github.com/SMPyBandits/SMPyBandits/blob/master/SMPyBandits/Policies/Exp3S.py#L38
 static void EXP3S_init(struct exp3_state* s, u32 nbArms, u32 T) {
-  
-  int i;
 
-  s->T = T;
-  s->t = 0;
-  s->nbArms = nbArms;
-  s->gamma = MIN(1.0f, sqrt(s->nbArms * log(s->nbArms * T) / T));
-  assert(s->gamma >= 0.f && s->gamma <= 1.f);
-  s->alpha = 1.0f / T;
-  s->CONSTANT_e = exp(1.0);
+    int i;
 
-  for (i = 0; i < s->nbArms; i++) {
+    s->T = T;
+    s->t = 0;
+    s->nbArms = nbArms;
+    s->gamma = MIN(1.0f, sqrt(s->nbArms * log(s->nbArms * T) / T));
+    assert(s->gamma >= 0.f && s->gamma <= 1.f);
+    s->alpha = 1.0f / T;
+    s->CONSTANT_e = exp(1.0);
 
-    s->weights[i] = 1.f / s->nbArms;
-    s->rewards[i] = 0;
-    s->trusts[i] = 1.f / s->nbArms;
+    for (i = 0; i < s->nbArms; i++) {
 
-  }
+        s->weights[i] = 1.f / s->nbArms;
+        s->rewards[i] = 0;
+        s->trusts[i] = 1.f / s->nbArms;
+
+    }
 
 }
 
 // https://github.com/SMPyBandits/SMPyBandits/blob/master/SMPyBandits/Policies/Exp3S.py#L122
 static void EXP3S_get_reward(struct exp3_state* s, float reward, u32 arm) {
 
-  int i;
-  float* old_weights;
-  float weights_sum;
+    int i;
+    float* old_weights;
+    float weights_sum;
 
-  assert(arm >= 0 && arm <= s->nbArms);
+    assert(arm >= 0 && arm <= s->nbArms);
 
-  s->t++;
-  s->rewards[arm] += reward;
+    s->t++;
+    s->rewards[arm] += reward;
 
-  EXP3S_trusts(s);
-  reward /= s->trusts[arm];
-  old_weights = ck_alloc_nozero(sizeof(float) * s->nbArms);
+    EXP3_trusts(s);
+    reward /= s->trusts[arm];
+    old_weights = (float*) malloc(sizeof(float) * s->nbArms);
 
-  for (i = 0; i < s->nbArms; i++) old_weights[i] = s->weights[i];
+    for (i = 0; i < s->nbArms; i++) old_weights[i] = s->weights[i];
 
-  weights_sum = EXP3_sum(old_weights, s->nbArms);
+    weights_sum = EXP3_sum(old_weights, s->nbArms);
 
-  for (i = 0; i < s->nbArms; i++) {
-
-    if (i != arm) {
-      s->weights[i] = old_weights[i] + s->CONSTANT_e * (s->alpha / s->nbArms) * weights_sum;
+    if (isinf(weights_sum)) {
+        for (i = 0; i < s->nbArms; i++) old_weights[i] = 1;
+        weights_sum = s->nbArms;
     }
 
+    for (i = 0; i < s->nbArms; i++) {
+
+        if (i != arm) {
+            s->weights[i] = old_weights[i] + s->CONSTANT_e * (s->alpha / s->nbArms) * weights_sum;
+        }
+    }
     s->weights[arm] = old_weights[arm] * exp(reward * (s->gamma / s->nbArms)) + s->CONSTANT_e * (s->alpha / s->nbArms) * weights_sum;
 
-  }
-
-  ck_free(old_weights);
+    free(old_weights);
 
 }
-
 /* Get unix time in milliseconds */
 
 static u64 get_cur_time(void) {
@@ -3469,6 +3500,54 @@ static void write_crash_readme(void) {
 
 }
 
+// for code coverage static
+void save_mapping() {
+  u8 *config_file, *input_file;
+  config_file = alloc_printf("%s/.cur_config", out_dir);
+  input_file  = alloc_printf("%s/.cur_input", out_dir);
+  
+  s32 config_fd, input_fd;
+  config_fd = open(config_file, O_RDONLY);
+  input_fd  = open(input_file, O_RDONLY);
+  
+  ck_free(config_file);
+  ck_free(input_file);
+  
+  struct stat config_st, input_st;
+  fstat(config_fd, &config_st);
+  fstat(input_fd, &input_st);
+
+  u8 *config_buf = ck_alloc_nozero(config_st.st_size);
+  u8 *input_buf  = ck_alloc_nozero(input_st.st_size);
+  
+  read(config_fd, config_buf, config_st.st_size);
+  read(input_fd, input_buf, input_st.st_size);
+  close(config_fd);
+  close(input_fd);
+
+  u8 *map_dir = alloc_printf("%s/mappings", out_dir);
+  // mkdir(map_dir, 0700);
+  u8 *config_path = alloc_printf("%s/config%u", map_dir, map_id);
+  u8 *input_path  = alloc_printf("%s/input%u", map_dir, map_id);
+  ck_free(map_dir);
+  
+  config_fd = open(config_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+  input_fd = open(input_path, O_WRONLY | O_CREAT | O_EXCL, 0600);
+  ck_free(config_path);
+  ck_free(input_path);
+
+  write(config_fd, config_buf, config_st.st_size);
+  write(input_fd, input_buf, input_st.st_size);
+  close(config_fd);
+  close(input_fd);
+  
+  ck_free(config_buf);
+  ck_free(input_buf);
+  
+  ++map_id;
+
+}
+
 
 /* Check if the result of an execve() during routine fuzzing is interesting,
    save or queue the input test case for further analysis if so. Returns 1 if
@@ -3523,6 +3602,8 @@ static u8 save_if_interesting(char** argv, void* mem, u32 len, u8 fault, enum qu
     if (fd < 0) PFATAL("Unable to create '%s'", fn);
     ck_write(fd, mem, len, fn);
     close(fd);
+    
+    save_mapping();
 
     keeping = 1;
 
@@ -4271,6 +4352,13 @@ static void maybe_delete_out_dir(void) {
   fn = alloc_printf("%s/plot_data", out_dir);
   if (unlink(fn) && errno != ENOENT) goto dir_cleanup_failed;
   ck_free(fn);
+
+  fn = alloc_printf("%s/mappings", out_dir);
+  u8 *command = alloc_printf("rm -r %s", fn);
+  system(command);
+  ck_free(fn);
+  ck_free(command);
+
 
   OKF("Output dir cleanup successful.");
 
@@ -5112,7 +5200,7 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len, enum queue_type o
   /* This handles FAULT_ERROR for us: */
 
   s32 queued_discovered = save_if_interesting(argv, out_buf, len, fault, oid);
-  EXP3S_get_reward(s, queued_discovered ? 0.f : 1.f, oid);
+  EXP3_get_reward(s, queued_discovered ? 0.f : 1.f, oid);
 
   objs[oid].queued_discovered += queued_discovered;
 
@@ -6039,6 +6127,33 @@ static u8 fuzz_one(char** argv, enum queue_type oid, struct exp3_state *s) {
   u8  a_collect[MAX_AUTO_EXTRA];
   u32 a_len = 0;
 
+  if (script_cmd && oid == CONFIG_QUEUE) {
+    objs[oid].stage_max = 10;
+    u8 *config_path = alloc_printf("%s/.tmp.conf", out_dir);
+    for (objs[oid].stage_cur = 0; objs[oid].stage_cur < objs[oid].stage_max; objs[oid].stage_cur++) {
+      system(script_cmd);
+      fd = open(config_path, O_RDONLY);
+
+      if (fd < 0) PFATAL("Unable to open '%s'", config_path);
+
+      struct stat st;
+      fstat(fd, &st);
+
+      len = st.st_size;
+
+      orig_in = in_buf = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+
+      if (orig_in == MAP_FAILED) PFATAL("Unable to mmap '%s'", config_path);
+
+      close(fd);
+
+      if (common_fuzz_stuff(argv, in_buf, len, oid, s)) goto abandon_entry;
+
+    }
+    ck_free(config_path);
+    return 0;
+  }
+
 #ifdef IGNORE_FINDS
 
   /* In IGNORE_FINDS mode, skip any entries that weren't in the
@@ -6143,15 +6258,15 @@ static u8 fuzz_one(char** argv, enum queue_type oid, struct exp3_state *s) {
 
   if (!dumb_mode && !objs[oid].queue_cur->trim_done) {
 
-    // u8 res = trim_case(argv, objs[oid].queue_cur, in_buf, oid);
+    u8 res = trim_case(argv, objs[oid].queue_cur, in_buf, oid);
 
-    // if (res == FAULT_ERROR)
-    //   FATAL("Unable to execute target application");
+    if (res == FAULT_ERROR)
+      FATAL("Unable to execute target application");
 
-    // if (stop_soon) {
-    //   objs[oid].cur_skipped_paths++;
-    //   goto abandon_entry;
-    // }
+    if (stop_soon) {
+      objs[oid].cur_skipped_paths++;
+      goto abandon_entry;
+    }
 
     /* Don't retry trimming, even if it failed. */
 
@@ -8337,6 +8452,9 @@ EXP_ST void setup_dirs_fds(void) {
                      "unique_hangs, max_depth, execs_per_sec\n");
                      /* ignore errors */
 
+  tmp = alloc_printf("%s/mappings", out_dir);
+  if (mkdir(tmp, 0700)) PFATAL("Unable to create '%s'", tmp);
+  ck_free(tmp);
 }
 
 
@@ -8867,7 +8985,7 @@ int main(int argc, char** argv) {
   gettimeofday(&tv, &tz);
   srandom(tv.tv_sec ^ tv.tv_usec ^ getpid());
 
-  while ((opt = getopt(argc, argv, "+i:o:f:m:b:t:T:dnCB:S:M:x:QV")) > 0)
+  while ((opt = getopt(argc, argv, "+i:o:f:m:b:t:T:dnCB:S:M:x:QVj:p:")) > 0)
 
     switch (opt) {
 
@@ -9053,6 +9171,16 @@ int main(int argc, char** argv) {
         /* Version number has been printed already, just quit. */
         exit(0);
 
+      case 'j':
+        if (config_generator) FATAL("Multiple -j options not supported");
+        config_generator = optarg;
+        break;
+
+      case 'p':
+        if (python_script) FATAL("Multiple -p options not supported");
+        python_script = optarg;
+        break;
+
       default:
 
         usage(argv[0]);
@@ -9166,9 +9294,12 @@ int main(int argc, char** argv) {
     if (stop_soon) goto stop_fuzzing;
   }
 
+  if (python_script && config_generator)
+    script_cmd = alloc_printf("python3 %s %s > %s/.tmp.conf", python_script, config_generator, out_dir);
+
   struct exp3_state *state = ck_alloc(sizeof(struct exp3_state));
 
-  EXP3S_init(state, TOTAL_QUEUE, 1000);
+  EXP3_init(state, TOTAL_QUEUE, 0.2f);
 
   while (1) {
 
@@ -9237,7 +9368,8 @@ int main(int argc, char** argv) {
     objs[cur_queue].queue_cur = objs[cur_queue].queue_cur->next;
     objs[cur_queue].current_entry++;
 
-    cur_queue = EXP3S_choice(state);
+    cur_queue = EXP3_choice(state);
+    // ACTF("Choosing queue: %s", queue_name[cur_queue]); 
 
   }
 

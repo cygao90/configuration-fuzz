@@ -1,11 +1,29 @@
 {
     "bnf": true,
+    "min_nonterminals": 3,
     "<start>": ["-i pipe:0 <options>+ pipe:1"],
     "<options>": [
-        "-f <format> "
+        "-f <format> ",
+        "-hq ",
+        "-vn ",
+        "-pass <n> ",
+        "-deinterlace ",
+        "-aic ",
+        "-umv ",
+        "-psnr ",
+        "-v "
     ],
+    "<n>": ["1", "2"],
     "<format>": [
         "avi",
-        "wav"
+        "wav",
+        "flv",
+        "bfi",
+        "dvd",
+        "eac3",
+        "h264",
+        "m4v",
+        "mov",
+        "s8"
     ]
 }
