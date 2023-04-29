@@ -40,16 +40,21 @@ def parse_grammar(filename: str) -> Grammar:
     # print(gram)
     return gram
 
-def gen_config(grammar: Grammar, min_nonterminals: int) -> str:
+def gen_config(grammar: Grammar) -> str:
     if "min_nonterminals" in grammar.keys():
         min_nonterminals = grammar["min_nonterminals"]
         del grammar["min_nonterminals"]
+    
+    max_nonterminals = min_nonterminals + 5
+    if "max_nonterminals" in grammar.keys():
+        max_nonterminals = grammar["max_nonterminals"]
+        del grammar["max_nonterminals"]
 
-    assert is_valid_grammar(grammar);
+    assert is_valid_grammar(grammar)
 
     ebnf= convert_ebnf_grammar(grammar)
 
-    f = GrammarCoverageFuzzer(ebnf, min_nonterminals = min_nonterminals)
+    f = GrammarCoverageFuzzer(ebnf, min_nonterminals = min_nonterminals, max_nonterminals = max_nonterminals)
 
     config = f.fuzz()
 
@@ -59,7 +64,7 @@ def gen_config(grammar: Grammar, min_nonterminals: int) -> str:
 
 
 def generate(grammar, symbol="<start>"):
-    assert is_valid_grammar(grammar);
+    assert is_valid_grammar(grammar)
 
     if symbol not in grammar:
         return symbol
@@ -67,7 +72,16 @@ def generate(grammar, symbol="<start>"):
         expansion = random.choice(grammar[symbol])
         tokens = expansion.split()
         return " ".join(generate(grammar, token) for token in tokens)
+    
 
+def main(file):
+    random.seed(time.time())
+
+    grammar = parse_grammar(file)
+
+    config = gen_config(grammar)
+    # print(config)
+    return config
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -77,14 +91,16 @@ if __name__ == "__main__":
     parser.add_argument("--min_nonterminals", "-m", type=int, default=10, help="# of non-terminals")
     args = parser.parse_args()
 
-    random.seed(time.time())
+    # random.seed(time.time())
 
-    grammar = parse_grammar(args.file)
+    # grammar = parse_grammar(args.file)
 
-    for i in range(args.num):
-        config = gen_config(grammar, args.min_nonterminals)
-        if args.dest is not None:
-            with open(f"{args.dest}/config{i}.conf", "w") as f:
-                f.write(config)
-        print(config)
+    # for i in range(args.num):
+    #     config = gen_config(grammar, args.min_nonterminals)
+    #     if args.dest is not None:
+    #         with open(f"{args.dest}/config{i}.conf", "w") as f:
+    #             f.write(config)
+    #     print(config)
+    s = main(args.file)
+    print(s)
     

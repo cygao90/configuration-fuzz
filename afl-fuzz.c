@@ -70,6 +70,9 @@
 
 #include <math.h>
 
+#define PY_SSIZE_T_CLEAN 
+#include <python3.10/Python.h>
+
 #if defined(__APPLE__) || defined(__FreeBSD__) || defined (__OpenBSD__)
 #  include <sys/sysctl.h>
 #endif /* __APPLE__ || __FreeBSD__ || __OpenBSD__ */
@@ -208,6 +211,22 @@ static s32 cpu_aff = -1;       	      /* Selected CPU core                */
 
 static FILE* plot_file;               /* Gnuplot output file              */
 
+enum queue_type cur_queue;
+
+u64 from_input, from_config;
+
+struct exp3_state *state;
+
+u32 cur_queue_discovered;
+u32 total_run_times;
+double avg_reward = 0.0;
+
+static FILE* reward_data;
+
+PyObject* p_module;
+PyObject* p_json_file;
+PyObject* p_func;
+
 struct queue_entry {
 
   u8* fname;                          /* File name for the test case      */
@@ -321,10 +340,10 @@ enum queue_type {
 
 struct exp3_state {
   u32 t, nbArms, T;
-  float gamma, alpha, CONSTANT_e;
-  float weights[TOTAL_QUEUE];
-  float rewards[TOTAL_QUEUE];
-  float trusts[TOTAL_QUEUE];
+  double gamma, alpha, CONSTANT_e;
+  double weights[TOTAL_QUEUE];
+  double rewards[TOTAL_QUEUE];
+  double trusts[TOTAL_QUEUE];
 };
 
 char* queue_name[] = {
@@ -401,9 +420,9 @@ enum {
 
 static inline u32 UR(u32 limit);
 
-static float EXP3_sum(float* arr, s32 n) {
+static double EXP3_sum(double* arr, s32 n) {
 
-  float sum;
+  double sum;
   int i;
 
   sum = 0.f;
@@ -415,7 +434,7 @@ static float EXP3_sum(float* arr, s32 n) {
 }
 
 
-static void EXP3_init(struct exp3_state* s, int arms, float gamma) {
+static void EXP3_init(struct exp3_state* s, int arms, double gamma) {
 
     int i;
 
@@ -437,7 +456,7 @@ static void EXP3_init(struct exp3_state* s, int arms, float gamma) {
 // https://github.com/SMPyBandits/SMPyBandits/blob/master/SMPyBandits/Policies/Exp3.py#L67
 static void EXP3_trusts(struct exp3_state* s) {
 
-    float sum;
+    double sum;
     int i;
 
     for (i = 0; i < s->nbArms; i++) {
@@ -469,9 +488,9 @@ static void EXP3_trusts(struct exp3_state* s) {
 
 /* Give a reward: increase t and update the weight */
 // https://github.com/SMPyBandits/SMPyBandits/blob/master/SMPyBandits/Policies/Exp3.py#L89
-static void EXP3_get_reward(struct exp3_state* s, float reward, u32 arm) {
+static void EXP3_get_reward(struct exp3_state* s, double reward, u32 arm) {
 
-    float sum;
+    double sum;
     int i;
 
     if (arm < 0 || arm >= s->nbArms) PFATAL("Wrong arm.");
@@ -482,7 +501,7 @@ static void EXP3_get_reward(struct exp3_state* s, float reward, u32 arm) {
     EXP3_trusts(s);
     reward /= s->trusts[arm];
 
-    float exp_para = reward * (s->gamma / s->nbArms);
+    double exp_para = reward * (s->gamma / s->nbArms);
     if (exp_para > 11000) {  // For ensuring not overflow
         exp_para = 11000;
     }
@@ -516,17 +535,19 @@ static void EXP3_get_reward(struct exp3_state* s, float reward, u32 arm) {
 }
 
 
-static s32 EXP3_weighted_random(float* trusts, s32 nbArms) {
+static s32 EXP3_weighted_random(double* trusts, s32 nbArms) {
 
-    float sum, rnd;
+    double sum, rnd;
     int i;
 
     sum = EXP3_sum(trusts, nbArms);
-    rnd = (float)UR(RAND_MAX) / (float)RAND_MAX * sum;
+    rnd = (double)UR(RAND_MAX) / (double)RAND_MAX * sum;
     for (i = 0; i < nbArms; i++) {
 
-        if (rnd < trusts[i])
-            return i;
+        if (rnd < trusts[i]) {
+          fprintf(reward_data, "choose %d\n", i);
+          return i;
+        }
 
         rnd -= trusts[i];
 
@@ -610,6 +631,26 @@ static void EXP3S_get_reward(struct exp3_state* s, float reward, u32 arm) {
     free(old_weights);
 
 }
+
+void init_python() {
+  Py_Initialize();
+  PyObject* sysPath = PySys_GetObject("path");
+  PyObject* path = PyUnicode_FromString("/home/ubuntu/fuzz/configuration-fuzz");
+  PyList_Append(sysPath, path);
+  // p_module = PyImport_ImportModule(python_script);
+  p_module = PyImport_ImportModule("gen_config");
+  p_json_file = PyUnicode_FromString(config_generator);
+  p_func = PyObject_GetAttrString(p_module, "main");
+}
+
+void finalize_python() {
+  Py_DECREF(p_module);
+  Py_DECREF(p_json_file);
+  Py_DECREF(p_func);
+
+  Py_Finalize();
+}
+
 /* Get unix time in milliseconds */
 
 static u64 get_cur_time(void) {
@@ -3983,10 +4024,10 @@ static void maybe_update_plot_file(double bitmap_cvg, double eps) {
      execs_per_sec */
 
   fprintf(plot_file, 
-          "%llu, %llu, %u, %u, %u, %u, %0.02f%%, %llu, %llu, %u, %0.02f\n",
+          "%llu, %llu, %u, %u, %u, %u, %0.02f%%, %llu, %llu, %u, %0.02f, %d, %lld, %lld, %0.02f, %0.02f\n",
           get_cur_time() / 1000, objs[INPUT_QUEUE].queue_cycle - 1, objs[INPUT_QUEUE].current_entry, objs[INPUT_QUEUE].queued_paths,
           objs[INPUT_QUEUE].pending_not_fuzzed, objs[INPUT_QUEUE].pending_favored, bitmap_cvg, objs[INPUT_QUEUE].unique_crashes,
-          unique_hangs, objs[INPUT_QUEUE].max_depth, eps); /* ignore errors */
+          unique_hangs, objs[INPUT_QUEUE].max_depth, eps, cur_queue, from_input, from_config, state->trusts[0], state->trusts[1]); /* ignore errors */
 
   fflush(plot_file);
 
@@ -5200,7 +5241,17 @@ EXP_ST u8 common_fuzz_stuff(char** argv, u8* out_buf, u32 len, enum queue_type o
   /* This handles FAULT_ERROR for us: */
 
   s32 queued_discovered = save_if_interesting(argv, out_buf, len, fault, oid);
-  EXP3_get_reward(s, queued_discovered ? 0.f : 1.f, oid);
+  // EXP3_get_reward(s, queued_discovered ? 0.f : 1.f, oid);
+  if (queued_discovered) {
+    cur_queue_discovered++;
+    if (oid == INPUT_QUEUE) {
+      from_input++;
+    } else {
+      from_config++;
+    }
+  }
+
+  total_run_times++;
 
   objs[oid].queued_discovered += queued_discovered;
 
@@ -6111,6 +6162,19 @@ static u8 could_be_interest(u32 old_val, u32 new_val, u8 blen, u8 check_le) {
 
 // }
 
+static double calculate_reward(double get_reward) {
+  if (avg_reward == 0.0) {
+    avg_reward = get_reward;
+  }
+  double original_reward = get_reward;
+  get_reward = get_reward / avg_reward;
+  if (original_reward != 0) {
+    avg_reward = 0.8 * avg_reward + 0.2 * original_reward;
+  }
+  
+  return get_reward;
+}
+
 /* Take the current entry from the queue, fuzz it for a while. This
    function is a tad too long... returns 0 if fuzzed successfully, 1 if
    skipped or bailed out. */
@@ -6127,30 +6191,41 @@ static u8 fuzz_one(char** argv, enum queue_type oid, struct exp3_state *s) {
   u8  a_collect[MAX_AUTO_EXTRA];
   u32 a_len = 0;
 
-  if (script_cmd && oid == CONFIG_QUEUE) {
-    objs[oid].stage_max = 10;
-    u8 *config_path = alloc_printf("%s/.tmp.conf", out_dir);
+  cur_queue_discovered = total_run_times = 0;
+
+  if (python_script && config_generator && oid == CONFIG_QUEUE) {
+    objs[oid].stage_max = 15;
+    // u8 *config_path = alloc_printf("%s/.tmp.conf", out_dir);
     for (objs[oid].stage_cur = 0; objs[oid].stage_cur < objs[oid].stage_max; objs[oid].stage_cur++) {
-      system(script_cmd);
-      fd = open(config_path, O_RDONLY);
+    //   system(script_cmd);
+    //   fd = open(config_path, O_RDONLY);
 
-      if (fd < 0) PFATAL("Unable to open '%s'", config_path);
+    //   if (fd < 0) PFATAL("Unable to open '%s'", config_path);
 
-      struct stat st;
-      fstat(fd, &st);
+    //   struct stat st;
+    //   fstat(fd, &st);
 
-      len = st.st_size;
+    //   len = st.st_size;
 
-      orig_in = in_buf = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
+    //   orig_in = in_buf = mmap(0, len, PROT_READ | PROT_WRITE, MAP_PRIVATE, fd, 0);
 
-      if (orig_in == MAP_FAILED) PFATAL("Unable to mmap '%s'", config_path);
+    //   if (orig_in == MAP_FAILED) PFATAL("Unable to mmap '%s'", config_path);
 
-      close(fd);
-
-      if (common_fuzz_stuff(argv, in_buf, len, oid, s)) goto abandon_entry;
+    //   close(fd);
+      PyObject* config = PyObject_CallOneArg(p_func, p_json_file);
+      u8* buffer = PyUnicode_AsUTF8AndSize(config, &len);
+      
+      common_fuzz_stuff(argv, buffer, len, oid, s);
+      Py_DECREF(config);
+      // Py_DECREF(s);
+      // if (common_fuzz_stuff(argv, in_buf, len, oid, s)) goto abandon_entry;
 
     }
-    ck_free(config_path);
+    double reward = calculate_reward(((double)cur_queue_discovered / total_run_times) / 100);
+    EXP3_get_reward(s, reward, oid);
+    fprintf(reward_data, "%lf, %lf, %lf, %lf, %d, %d, %lf, %lf\n", s->rewards[INPUT_QUEUE], s->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered,
+                    s->trusts[INPUT_QUEUE], s->trusts[CONFIG_QUEUE]);
+    // ck_free(config_path);
     return 0;
   }
 
@@ -7712,6 +7787,11 @@ havoc_stage:
     objs[oid].stage_cycles[STAGE_SPLICE] += objs[oid].stage_max;
   }
 
+  double reward = calculate_reward((double)cur_queue_discovered / total_run_times);
+  EXP3_get_reward(s, reward, oid);
+  fprintf(reward_data, "%lf, %lf, %lf, %lf, %d, %d, %lf, %lf\n", s->rewards[INPUT_QUEUE], s->rewards[CONFIG_QUEUE], avg_reward, reward, total_run_times, cur_queue_discovered,
+                    s->trusts[INPUT_QUEUE], s->trusts[CONFIG_QUEUE]);
+
 #ifndef IGNORE_FINDS
 
   /************
@@ -8449,12 +8529,20 @@ EXP_ST void setup_dirs_fds(void) {
 
   fprintf(plot_file, "# unix_time, cycles_done, cur_path, paths_total, "
                      "pending_total, pending_favs, map_size, unique_crashes, "
-                     "unique_hangs, max_depth, execs_per_sec\n");
+                     "unique_hangs, max_depth, execs_per_sec, cur_queue, from_input, from_config, trusts_config, trusts_input\n");
                      /* ignore errors */
 
   tmp = alloc_printf("%s/mappings", out_dir);
   if (mkdir(tmp, 0700)) PFATAL("Unable to create '%s'", tmp);
   ck_free(tmp);
+
+  tmp = alloc_printf("%s/reward_data", out_dir);
+  fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL, 0600);
+  if (fd < 0) PFATAL("Unable to create '%s'", tmp);
+  ck_free(tmp);
+  reward_data = fdopen(fd, "w");
+  if (!reward_data) PFATAL("fopen() failed");
+  fprintf(reward_data, "# input reward, config reward, avg_reward\n");
 }
 
 
@@ -9269,7 +9357,8 @@ int main(int argc, char** argv) {
     use_argv = argv + optind;
 
 
-  enum queue_type cur_queue = INPUT_QUEUE;
+  cur_queue = INPUT_QUEUE;
+  from_input = from_config = 0;
 
   perform_dry_run(use_argv, INPUT_QUEUE);
   perform_dry_run(use_argv, CONFIG_QUEUE);
@@ -9294,12 +9383,14 @@ int main(int argc, char** argv) {
     if (stop_soon) goto stop_fuzzing;
   }
 
-  if (python_script && config_generator)
-    script_cmd = alloc_printf("python3 %s %s > %s/.tmp.conf", python_script, config_generator, out_dir);
+  // if (python_script && config_generator)
+  //   script_cmd = alloc_printf("python3 %s %s > %s/.tmp.conf", python_script, config_generator, out_dir);
 
-  struct exp3_state *state = ck_alloc(sizeof(struct exp3_state));
+  init_python();
 
-  EXP3_init(state, TOTAL_QUEUE, 0.2f);
+  state = ck_alloc(sizeof(struct exp3_state));
+
+  EXP3_init(state, TOTAL_QUEUE, 0.20f);
 
   while (1) {
 
@@ -9405,12 +9496,15 @@ stop_fuzzing:
 
   }
 
+  fclose(reward_data);
   fclose(plot_file);
   destroy_queue();
   destroy_extras();
   ck_free(target_path);
   ck_free(sync_id);
   ck_free(state);
+
+  finalize_python();
 
   alloc_report();
 

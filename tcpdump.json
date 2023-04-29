@@ -1,5 +1,7 @@
 {
     "bnf": true,
+    "min_nonterminals": 1,
+    "max_nonterminals": 3,
     "<start>": [
         "<tcpdump-options>+"
     ],
@@ -8,16 +10,38 @@
         "<quiet-option> ",
         "<no-timestamp-option> ",
         "<hex-ascii-option> ",
-        "<count-option> ",
         "<ascii-option> ",
         "<very-verbose-option> ",
         "<timestamp-option> ",
         "<time-format-option> ",
-        "<packet-buffer-size-option> ",
         "<directional-option> ",
         "<link-layer-header-option> ",
         "<vlan-header-option> ",
-        "<rssi-header-option> "
+        "<rssi-header-option> ",
+        "--print ",
+        "--number ",
+        "--micro ",
+        "--nano ",
+        "-b ",
+        "-d ",
+        "-dd ",
+        "-ddd ",
+        "-f ",
+        "-E ",
+        "-H ",
+        "-I ",
+        "--monitor-mode ",
+        "--immediate-mode ",
+        "-J ",
+        "-K ",
+        "-N ",
+        "--number ",
+        "-O ",
+        "-p ",
+        "-S ",
+        "-xx ",
+        "-X ",
+        "-XX "
     ],
     "<hostname-resolution-option>": [
         "-n"
@@ -31,9 +55,6 @@
     "<hex-ascii-option>": [
         "-X"
     ],
-    "<count-option>": [
-        "-c <packet-count>"
-    ],
     "<ascii-option>": [
         "-A"
     ],
@@ -46,9 +67,6 @@
     "<time-format-option>": [
         "-tttt <time-format>"
     ],
-    "<packet-buffer-size-option>": [
-        "-B <buffer-size>"
-    ],
     "<directional-option>": [
         "-Q <directional-option-value>"
     ],
@@ -60,9 +78,6 @@
     ],
     "<rssi-header-option>": [
         "rssi"
-    ],
-    "<packet-count>": [
-        "<integer>"
     ],
     "<timestamp-type>": [
         "ru",
@@ -106,14 +121,9 @@
         "%Y-%m-%d %H:%M:%S",
         "%H:%M:%S.%f"
     ],
-    "<buffer-size>": [
-        "<integer>"
-    ],
     "<directional-option-value>": [
         "in",
         "out",
         "inout"
-    ],
-    "<integer>": ["<digit>+"],
-    "<digit>": ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+    ]
 }
